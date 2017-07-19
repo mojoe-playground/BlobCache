@@ -14,6 +14,11 @@
 
         private GlobalReaderWriterLocker _rwl;
 
+        public SessionConcurrencyHandler()
+        {
+            Timeout = 5000;
+        }
+
         private MemoryMappedFile Memory
         {
             get

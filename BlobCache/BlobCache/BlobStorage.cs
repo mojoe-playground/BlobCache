@@ -11,7 +11,6 @@
     public class BlobStorage<T> : IDisposable where T : ConcurrencyHandler, new()
     {
         private const int LastVersion = 1;
-        private const int Timeout = 1000;
 
         private const int HeaderSize = 24;
 
@@ -66,7 +65,7 @@
         {
             return Task.Run(() =>
             {
-                using (WriteLock(Timeout))
+                using (WriteLock(ConcurrencyHandler.Timeout))
                 {
                     var info = ReadInfo();
 
@@ -122,7 +121,7 @@
                 using (var f = Open())
                 using (var w = new BinaryWriter(f, Encoding.UTF8))
                 {
-                    using (WriteLock(Timeout))
+                    using (WriteLock(ConcurrencyHandler.Timeout))
                     {
                         var info = ReadInfo();
 
@@ -205,7 +204,7 @@
                     await f.FlushAsync();
                 }
 
-                using (WriteLock(Timeout))
+                using (WriteLock(ConcurrencyHandler.Timeout))
                 {
                     var info = ReadInfo();
 
@@ -246,7 +245,7 @@
                 using (var f = Open())
                 using (var w = new BinaryWriter(f, Encoding.UTF8))
                 {
-                    using (WriteLock(Timeout))
+                    using (WriteLock(ConcurrencyHandler.Timeout))
                     {
                         var info = ReadInfo();
 
@@ -288,7 +287,7 @@
                     await f.FlushAsync();
                 }
 
-                using (WriteLock(Timeout))
+                using (WriteLock(ConcurrencyHandler.Timeout))
                 {
                     var info = ReadInfo();
 
@@ -307,7 +306,7 @@
             {
                 StorageChunk chunk;
 
-                using (ReadLock(Timeout))
+                using (ReadLock(ConcurrencyHandler.Timeout))
                 {
                     var info = ReadInfo();
 
@@ -404,7 +403,7 @@
         {
             return Task.Run(() =>
             {
-                using (ReadLock(Timeout))
+                using (ReadLock(ConcurrencyHandler.Timeout))
                 {
                     return (IReadOnlyList<StorageChunk>) ReadInfo().Chunks;
                 }

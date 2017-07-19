@@ -8,6 +8,8 @@
         [PublicAPI]
         public Guid Id { get; set; }
 
+        public int Timeout { get; protected set; } = 1000;
+
         public void Dispose()
         {
             Dispose(true);
