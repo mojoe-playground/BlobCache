@@ -12,6 +12,7 @@
         public bool Changing { get; internal set; }
         public uint Id { get; }
         public uint UserData { get; }
+        public int ReadCount { get; set; }
 
         public StorageChunk(uint id, uint userData, int chunkType, long position, uint size)
         {
@@ -21,6 +22,7 @@
             Size = size;
             UserData = userData;
             Changing = false;
+            ReadCount = 0;
         }
 
         public const int ChunkHeaderSize = 16;
@@ -44,7 +46,7 @@
             return new StorageChunk(i,d, t, p, s);
         }
 
-        public static StorageChunk FromStream(BinaryReader reader)
+        internal static StorageChunk FromStream(BinaryReader reader)
         {
             var p = reader.ReadInt64();
             var t = reader.ReadInt32();
@@ -55,7 +57,15 @@
             return new StorageChunk(i, d, t, p, s);
         }
 
-        public void ToStream(BinaryWriter writer)
+        internal void ToStorage(BinaryWriter writer, bool forceFree = false)
+        {
+            writer.Write(forceFree ? ChunkTypes.Free : Type);
+            writer.Write(Id);
+            writer.Write(UserData);
+            writer.Write(Size);
+        }
+
+        internal void ToStream(BinaryWriter writer)
         {
             writer.Write(Position);
             writer.Write(Type);

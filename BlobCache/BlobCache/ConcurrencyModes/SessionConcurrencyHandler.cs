@@ -2,6 +2,7 @@
 {
     using System;
     using System.Diagnostics;
+    using System.IO;
     using System.IO.MemoryMappedFiles;
     using System.Security.AccessControl;
     using System.Security.Principal;
@@ -29,21 +30,11 @@
                         if (_mmf != null)
                             return _mmf;
 
-                       _mmf = CreateMemoryMappedFile();
+                        _mmf = CreateMemoryMappedFile();
                     }
 
                 return _mmf;
             }
-        }
-
-        protected virtual MemoryMappedFile CreateMemoryMappedFile()
-        {
-            var security = new MemoryMappedFileSecurity();
-            var rule = new AccessRule<MemoryMappedFileRights>(new SecurityIdentifier(WellKnownSidType.WorldSid, null), MemoryMappedFileRights.FullControl, AccessControlType.Allow);
-            security.AddAccessRule(rule);
-
-            return MemoryMappedFile.CreateOrOpen($"{(IsGlobal ? "Global\\" : "")}BlobStorage-{Id}-Info",
-                1024 * 1024, MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.None, security, System.IO.HandleInheritability.None);
         }
 
         protected bool IsGlobal { get; set; } = false;
@@ -63,6 +54,18 @@
 
                 return _rwl;
             }
+        }
+
+        protected virtual MemoryMappedFile CreateMemoryMappedFile()
+        {
+            var security = new MemoryMappedFileSecurity();
+            var rule = new AccessRule<MemoryMappedFileRights>(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                MemoryMappedFileRights.FullControl, AccessControlType.Allow);
+            security.AddAccessRule(rule);
+
+            return MemoryMappedFile.CreateOrOpen($"{(IsGlobal ? "Global\\" : "")}BlobStorage-{Id}-Info",
+                1024 * 1024, MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.None, security,
+                HandleInheritability.None);
         }
 
         public override IDisposable ReadLock(int timeout)
@@ -89,6 +92,21 @@
             {
                 info.WriteToStream(s);
             }
+        }
+
+        public override void WaitForReadFinish()
+        {
+            ReaderWriterLock.ReadEvent.WaitOne();
+        }
+
+        public override void SignalReadFinish()
+        {
+            ReaderWriterLock.ReadEvent.Set();
+        }
+
+        public override void SignalWaitRequired()
+        {
+            ReaderWriterLock.ReadEvent.Reset();
         }
 
         protected override void Dispose(bool disposing)
@@ -125,7 +143,16 @@
                 _semaphore = new Semaphore(SemaphoreCount, SemaphoreCount,
                     $"{(global ? "Global\\" : "")}BlobStorage-{id}-ReadLock", out _,
                     semaphoreSecurity);
+
+                var eventSecurity = new EventWaitHandleSecurity();
+                var eventRule = new EventWaitHandleAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                    EventWaitHandleRights.FullControl, AccessControlType.Allow);
+                eventSecurity.AddAccessRule(eventRule);
+                ReadEvent = new EventWaitHandle(true, EventResetMode.ManualReset,
+                    $"{(global ? "Global\\" : "")}BlobStorage-{id}-ReadSignal", out _, eventSecurity);
             }
+
+            public EventWaitHandle ReadEvent { get; }
 
             public void Dispose()
             {

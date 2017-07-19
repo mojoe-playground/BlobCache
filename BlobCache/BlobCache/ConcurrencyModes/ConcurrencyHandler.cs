@@ -24,6 +24,15 @@
 
         public abstract void WriteInfo(StorageInfo info);
 
+        // Should wait for manual signal
+        public abstract void WaitForReadFinish();
+
+        // Should set manual signal
+        public abstract void SignalReadFinish();
+
+        // Should reset manual signal
+        public abstract void SignalWaitRequired();
+
         protected virtual void Dispose(bool disposing)
         {
             if (disposing)

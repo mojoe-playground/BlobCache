@@ -40,6 +40,21 @@
             LocalSyncData.WriteInfo(Id, info);
         }
 
+        public override void WaitForReadFinish()
+        {
+            LocalSyncData.Signal(Id).Wait();
+        }
+
+        public override void SignalReadFinish()
+        {
+            LocalSyncData.Signal(Id).Set();
+        }
+
+        public override void SignalWaitRequired()
+        {
+            LocalSyncData.Signal(Id).Reset();
+        }
+
         protected override void Dispose(bool disposing)
         {
             LocalSyncData.ReleaseData(Id);
@@ -68,8 +83,9 @@
         private static class LocalSyncData
         {
             private static readonly
-                Dictionary<Guid, (int UsedLockCount, StorageInfo Info, ReaderWriterLockSlim ReadWriteLock)> Data =
-                    new Dictionary<Guid, (int, StorageInfo, ReaderWriterLockSlim)>();
+                Dictionary<Guid, (int UsedLockCount, StorageInfo Info, ReaderWriterLockSlim ReadWriteLock,
+                    ManualResetEventSlim ManualReset)> Data =
+                    new Dictionary<Guid, (int, StorageInfo, ReaderWriterLockSlim, ManualResetEventSlim)>();
 
             public static void ReleaseData(Guid id)
             {
@@ -95,12 +111,12 @@
                 {
                     if (!Data.ContainsKey(id))
                     {
-                        Data[id] = (0, info, new ReaderWriterLockSlim());
+                        Data[id] = (0, info, new ReaderWriterLockSlim(), new ManualResetEventSlim());
                     }
                     else
                     {
                         var r = Data[id];
-                        Data[id] = (r.UsedLockCount, info, r.ReadWriteLock);
+                        Data[id] = (r.UsedLockCount, info, r.ReadWriteLock, r.ManualReset);
                     }
                 }
             }
@@ -111,9 +127,23 @@
                 lock (Data)
                 {
                     if (!Data.ContainsKey(id))
-                        Data[id] = (0, default(StorageInfo), new ReaderWriterLockSlim());
+                        Data[id] = (0, default(StorageInfo), new ReaderWriterLockSlim(), new ManualResetEventSlim());
 
                     locker = Data[id].ReadWriteLock;
+                }
+
+                return locker;
+            }
+
+            public static ManualResetEventSlim Signal(Guid id)
+            {
+                ManualResetEventSlim locker;
+                lock (Data)
+                {
+                    if (!Data.ContainsKey(id))
+                        Data[id] = (0, default(StorageInfo), new ReaderWriterLockSlim(), new ManualResetEventSlim());
+
+                    locker = Data[id].ManualReset;
                 }
 
                 return locker;

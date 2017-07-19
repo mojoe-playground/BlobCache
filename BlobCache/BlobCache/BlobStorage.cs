@@ -156,9 +156,7 @@
                                     {Changing = true};
                                 info.Chunks[index] = free;
                                 chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size)
-                                {
-                                    Changing = true
-                                };
+                                    {Changing = true};
                                 info.Chunks.Add(chunk);
                             }
                         }
@@ -170,9 +168,7 @@
                                 ? HeaderSize
                                 : last.Position + last.Size + StorageChunk.ChunkHeaderSize;
                             chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size)
-                            {
-                                Changing = true
-                            };
+                                {Changing = true};
                             info.Chunks.Add(chunk);
                             f.SetLength(position + StorageChunk.ChunkHeaderSize + size);
                         }
@@ -182,19 +178,13 @@
 
                     // write chunk data to blob
                     f.Position = chunk.Position;
-                    w.Write(ChunkTypes.Free);
-                    w.Write(chunk.Id);
-                    w.Write(chunk.UserData);
-                    w.Write(chunk.Size);
+                    chunk.ToStorage(w, true);
                     await data.CopyToAsync(f);
 
                     if (free.Changing)
                     {
                         f.Position = free.Position;
-                        w.Write(free.Type);
-                        w.Write(free.Id);
-                        w.Write(free.UserData);
-                        w.Write(free.Size);
+                        free.ToStorage(w);
                     }
 
                     await f.FlushAsync();
@@ -238,87 +228,162 @@
             return id;
         }
 
-        public Task<bool> RemoveChunk(StorageChunk chunk)
+        public Task RemoveChunk(Func<IReadOnlyList<StorageChunk>, StorageChunk?> selector)
         {
+            if (selector == null)
+                throw new ArgumentNullException(nameof(selector));
+
             return Task.Run(async () =>
             {
-                using (var f = Open())
-                using (var w = new BinaryWriter(f, Encoding.UTF8))
+                var wait = false;
+
+                while (true)
                 {
+                    StorageChunk chunk;
+
+                    // If there are readers for the selected chunk wait here while a read is finished and try again
+                    if (wait)
+                        ConcurrencyHandler.WaitForReadFinish();
+
+                    using (var f = Open())
+                    using (var w = new BinaryWriter(f, Encoding.UTF8))
+                    {
+                        using (WriteLock(ConcurrencyHandler.Timeout))
+                        {
+                            var info = ReadInfo();
+
+                            // Get the chunk to delete
+                            var item = selector.Invoke(info.Chunks.Where(c => c.Type != ChunkTypes.Free && !c.Changing).ToList());
+                            if (item == null || item.Value == default(StorageChunk))
+                                return;
+
+                            chunk = item.Value;
+
+                            // if there are readers for the chunk, wait for finish and try again
+                            if (chunk.ReadCount > 0)
+                            {
+                                wait = true;
+                                ConcurrencyHandler.SignalWaitRequired();
+                                continue;
+                            }
+
+                            var freeSize = chunk.Size;
+                            var freePosition = chunk.Position;
+
+                            // Check next chunk is free, combine free space
+                            var nextPos = chunk.Position + StorageChunk.ChunkHeaderSize + chunk.Size;
+                            var nextChunk = info.Chunks.FirstOrDefault(c => c.Position == nextPos);
+
+                            if (nextChunk.Type == ChunkTypes.Free && !nextChunk.Changing)
+                            {
+                                freeSize += StorageChunk.ChunkHeaderSize + nextChunk.Size;
+                                info.Chunks.Remove(nextChunk);
+                            }
+
+                            // Check previous chunk is free, combine free space
+                            var pos = chunk.Position;
+                            var previousChunk = info.Chunks.Where(c => c.Position < pos)
+                                .OrderByDescending(c => c.Position).FirstOrDefault();
+
+                            if (previousChunk.Type == ChunkTypes.Free && !previousChunk.Changing)
+                            {
+                                freeSize += StorageChunk.ChunkHeaderSize + previousChunk.Size;
+                                freePosition = previousChunk.Position;
+                                info.Chunks.Remove(previousChunk);
+                            }
+
+                            // Mark the chunk changing while updating the file
+                            var index = info.Chunks.IndexOf(chunk);
+                            chunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition,
+                                    freeSize)
+                                {Changing = true};
+                            info.Chunks[index] = chunk;
+
+                            WriteInfo(info);
+                        }
+
+                        // Mark the chunk free
+                        f.Position = chunk.Position;
+                        chunk.ToStorage(w);
+                        await f.FlushAsync();
+                    }
+
                     using (WriteLock(ConcurrencyHandler.Timeout))
                     {
                         var info = ReadInfo();
-                        var chunk1 = chunk;
-                        if (!info.Chunks.Any(c => c.Id == chunk1.Id && c.Position == chunk1.Position && c.Size == chunk1.Size && c.Type == chunk1.Type && c.UserData == chunk1.UserData))
-                            return false;
-
-                        var freeSize = chunk.Size;
-                        var freePosition = chunk.Position;
-
-                        // Check next chunk is free, combine free space
-                        var nextPos = chunk.Position + StorageChunk.ChunkHeaderSize + chunk.Size;
-                        var nextChunk = info.Chunks.FirstOrDefault(c => c.Position == nextPos);
-
-                        if (nextChunk.Type == ChunkTypes.Free && !nextChunk.Changing)
-                        {
-                            freeSize += StorageChunk.ChunkHeaderSize + nextChunk.Size;
-                            info.Chunks.Remove(nextChunk);
-                        }
-
-                        // Check previous chunk is free, combine free space
-                        var pos = chunk.Position;
-                        var previousChunk = info.Chunks.Where(c => c.Position < pos)
-                            .OrderByDescending(c => c.Position).FirstOrDefault();
-
-                        if (previousChunk.Type == ChunkTypes.Free && !previousChunk.Changing)
-                        {
-                            freeSize += StorageChunk.ChunkHeaderSize + previousChunk.Size;
-                            freePosition = previousChunk.Position;
-                            info.Chunks.Remove(previousChunk);
-                        }
 
                         var index = info.Chunks.IndexOf(chunk);
-                        chunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition,
-                            freeSize) {Changing = true};
+                        chunk.Changing = false;
                         info.Chunks[index] = chunk;
 
                         WriteInfo(info);
                     }
 
-                    f.Position = chunk.Position;
-                    w.Write(ChunkTypes.Free);
-                    await f.FlushAsync();
+                    break;
                 }
+            });
+        }
+
+        public Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(
+            Func<IReadOnlyList<StorageChunk>, IEnumerable<StorageChunk>> selector)
+        {
+            if (selector == null)
+                throw new ArgumentNullException(nameof(selector));
+
+            return Task.Run(async () =>
+            {
+                List<StorageChunk> chunksToRead;
+                var res = new List<(StorageChunk, byte[])>();
 
                 using (WriteLock(ConcurrencyHandler.Timeout))
                 {
                     var info = ReadInfo();
+                    var chunks = info.Chunks.Where(c => !c.Changing && c.Type != ChunkTypes.Free).ToList();
 
-                    var index = info.Chunks.IndexOf(chunk);
-                    chunk.Changing = false;
-                    info.Chunks[index] = chunk;
+                    chunksToRead = selector.Invoke(chunks)?.ToList();
+                    if (chunksToRead == null)
+                        return res;
+
+                    foreach (var r in chunksToRead)
+                    {
+                        var chunk = r;
+                        var index = info.Chunks.IndexOf(chunk);
+                        chunk.ReadCount++;
+                        info.Chunks[index] = chunk;
+                    }
 
                     WriteInfo(info);
                 }
 
-                return true;
-            });
-        }
-
-        public Task<byte[]> ReadChunk(uint id)
-        {
-            return Task.Run(async () =>
-            {
-                StorageChunk chunk;
-
-                using (ReadLock(ConcurrencyHandler.Timeout))
+                var finishedOne = false;
+                try
                 {
-                    var info = ReadInfo();
+                    foreach (var r in chunksToRead)
+                        res.Add((r, await ReadChunk(r)));
+                }
+                finally
+                {
+                    using (WriteLock(ConcurrencyHandler.Timeout))
+                    {
+                        var info = ReadInfo();
 
-                    chunk = info.Chunks.Single(c => c.Id == id);
+                        foreach (var r in chunksToRead)
+                        {
+                            var chunk = r;
+                            var index = info.Chunks.IndexOf(chunk);
+                            chunk.ReadCount--;
+                            info.Chunks[index] = chunk;
+                            finishedOne = finishedOne || chunk.ReadCount == 0;
+                        }
+
+                        WriteInfo(info);
+                    }
                 }
 
-                return await ReadChunk(chunk);
+                if (finishedOne)
+                    ConcurrencyHandler.SignalReadFinish();
+
+                return (IReadOnlyList<(StorageChunk, byte[])>) res;
             });
         }
 

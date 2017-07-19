@@ -22,8 +22,8 @@
                 Assert.Equal(11u, c1.UserData);
                 Assert.Equal((uint) data.Length, c1.Size);
 
-                var res = await s.ReadChunk(1);
-                Assert.Equal(data, res);
+                var res = await s.ReadChunks(sc => sc.Where(c => c.Id == 1));
+                Assert.Equal(data, res.First().Data);
             }
         }
     }

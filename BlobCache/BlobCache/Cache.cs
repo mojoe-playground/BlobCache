@@ -36,6 +36,7 @@
 
         public async Task<byte[]> Get(string key)
         {
+            var hash = GetHash(key);
             var head = await ValidHead(key);
 
             if (string.IsNullOrEmpty(head.Key))
@@ -43,9 +44,19 @@
 
             var result = new byte[head.Length];
             var position = 0;
+
+            var chunks = await Storage.ReadChunks(sc => {
+                var list = sc.Where(c => head.Chunks.Contains(c.Id)).ToList();
+
+                if (list.Any(c => c.UserData != hash || c.Type != ChunkTypes.Data))
+                    return null;
+
+                return list;
+            });
+
             foreach (var c in head.Chunks)
             {
-                var data = await Storage.ReadChunk(c);
+                var data = chunks.First(ch => ch.Chunk.Id == c).Data;
                 Array.Copy(data, 0, result, position, data.Length);
                 position += data.Length;
             }
@@ -115,17 +126,25 @@
             // Remove old heads
             foreach (var h in heads)
             {
-                foreach (var id in h.ValidChunks)
-                    await Storage.RemoveChunk(id);
-                await Storage.RemoveChunk(h.HeadChunk);
+                await Storage.RemoveChunk(sc => {
+                    var l = sc.Where(c => c.Id == h.HeadChunk.Id && c.Type == ChunkTypes.Head && c.UserData == hash).ToList();
+                    if (l.Count == 0)
+                        return null;
+                    return l.First();
+                });
+                foreach (var ch in h.ValidChunks)
+                    await Storage.RemoveChunk(sc => {
+                        var l = sc.Where(c => c.Id == ch.Id && c.Type == ChunkTypes.Data && c.UserData == hash).ToList();
+                        if (l.Count == 0)
+                            return null;
+                        return l.First();
+                    });
             }
         }
 
         public async Task<bool> Remove(string key)
         {
-            if (string.IsNullOrEmpty(key))
-                throw new ArgumentNullException(key);
-
+            var hash = GetHash(key);
             var heads = await Heads(key);
 
             if (heads.Count == 0)
@@ -133,9 +152,19 @@
 
             foreach (var h in heads)
             {
-                foreach (var id in h.ValidChunks)
-                    await Storage.RemoveChunk(id);
-                await Storage.RemoveChunk(h.HeadChunk);
+                await Storage.RemoveChunk(sc => {
+                    var l = sc.Where(c => c.Id == h.HeadChunk.Id && c.Type == ChunkTypes.Head && c.UserData == hash).ToList();
+                    if (l.Count == 0)
+                        return null;
+                    return l.First();
+                });
+                foreach (var ch in h.ValidChunks)
+                    await Storage.RemoveChunk(sc => {
+                        var l = sc.Where(c => c.Id == ch.Id && c.Type == ChunkTypes.Data && c.UserData == hash).ToList();
+                        if (l.Count == 0)
+                            return null;
+                        return l.First();
+                    });
             }
 
             return true;
@@ -155,27 +184,34 @@
 
         private async Task<List<CacheHead>> Heads(string key)
         {
-            var chunks = await Storage.GetChunks();
-            var heads = chunks.Where(c => c.Type == ChunkTypes.Head).ToList();
-            var data = chunks.Where(c => c.Type == ChunkTypes.Data).ToList();
-
+            uint hash = 0u;
             if (!string.IsNullOrEmpty(key))
-            {
-                var hash = GetHash(key);
-                heads = heads.Where(c => c.UserData == hash).ToList();
-            }
+                hash = GetHash(key);
 
             var res = new List<CacheHead>();
-            foreach (var h in heads)
-                using (var ms = new MemoryStream(await Storage.ReadChunk(h.Id)))
+            var data = new List<StorageChunk>();
+
+            // Read all head records (matching the key is given) and store all data chunk info
+            var headData = await Storage.ReadChunks(sc => {
+                data = sc.Where(c => c.Type == ChunkTypes.Data).ToList();
+                var heads = sc.Where(c => c.Type == ChunkTypes.Head);
+                if (!string.IsNullOrEmpty(key))
+                    heads = heads.Where(c => c.UserData == hash);
+                return heads.ToList();
+            });
+
+            // Process loaded head records
+            foreach (var h in headData)
+                using (var ms = new MemoryStream(h.Data))
                 using (var r = new BinaryReader(ms, Encoding.UTF8))
                 {
                     var head = CacheHead.FromStream(r);
+                    // If key given and not maching, ignore the header
                     if (!string.IsNullOrEmpty(key) && !KeyEquals(key, head.Key))
                         continue;
-                    head.HeadChunk = h;
-                    var hash = GetHash(head.Key);
-                    head.ValidChunks = head.Chunks.Where(c => data.Any(ch => ch.Id == c && ch.UserData == hash))
+                    head.HeadChunk = h.Chunk;
+                    var headHash = GetHash(head.Key);
+                    head.ValidChunks = head.Chunks.Where(c => data.Any(ch => ch.Id == c && ch.UserData == headHash))
                         .Select(c => data.First(ch => ch.Id == c)).ToList();
                     res.Add(head);
                 }
