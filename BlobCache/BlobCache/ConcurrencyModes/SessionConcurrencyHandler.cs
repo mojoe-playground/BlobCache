@@ -1,4 +1,4 @@
-﻿namespace BlobCache
+﻿namespace BlobCache.ConcurrencyModes
 {
     using System;
     using System.Diagnostics;
@@ -7,17 +7,12 @@
     using System.Security.Principal;
     using System.Threading;
 
-    public class GlobalBlobStorage : BlobStorage
+    public class SessionConcurrencyHandler : ConcurrencyHandler
     {
         private readonly object _locker = new object();
         private MemoryMappedFile _mmf;
 
         private GlobalReaderWriterLocker _rwl;
-
-        public GlobalBlobStorage(string fileName)
-            : base(fileName)
-        {
-        }
 
         private MemoryMappedFile Memory
         {
@@ -29,12 +24,15 @@
                         if (_mmf != null)
                             return _mmf;
 
-                        _mmf = MemoryMappedFile.CreateOrOpen($"BlobStorage-{Id}-Info", 1024 * 1024);
+                        _mmf = MemoryMappedFile.CreateOrOpen($"{(IsGlobal ? "Global\\" : "")}BlobStorage-{Id}-Info",
+                            1024 * 1024);
                     }
 
                 return _mmf;
             }
         }
+
+        protected bool IsGlobal { get; set; }
 
         private GlobalReaderWriterLocker ReaderWriterLock
         {
@@ -46,24 +44,24 @@
                         if (_rwl != null)
                             return _rwl;
 
-                        _rwl = new GlobalReaderWriterLocker(Id);
+                        _rwl = new GlobalReaderWriterLocker(Id, IsGlobal);
                     }
 
                 return _rwl;
             }
         }
 
-        protected override IDisposable ReadLock(int timeout)
+        public override IDisposable ReadLock(int timeout)
         {
             return ReaderWriterLock.ReadLock(timeout);
         }
 
-        protected override IDisposable WriteLock(int timeout)
+        public override IDisposable WriteLock(int timeout)
         {
             return ReaderWriterLock.WriteLock(timeout);
         }
 
-        protected override StorageInfo ReadInfo()
+        public override StorageInfo ReadInfo()
         {
             using (var s = Memory.CreateViewStream())
             {
@@ -71,7 +69,7 @@
             }
         }
 
-        protected override void WriteInfo(StorageInfo info)
+        public override void WriteInfo(StorageInfo info)
         {
             using (var s = Memory.CreateViewStream())
             {
@@ -82,6 +80,7 @@
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
+
             _mmf?.Dispose();
             _mmf = null;
             _rwl?.Dispose();
@@ -95,20 +94,22 @@
             private readonly Mutex _mutex;
             private readonly Semaphore _semaphore;
 
-            public GlobalReaderWriterLocker(Guid id)
+            public GlobalReaderWriterLocker(Guid id, bool global)
             {
                 var allowEveryoneRule = new MutexAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
                     MutexRights.FullControl, AccessControlType.Allow);
                 var securitySettings = new MutexSecurity();
                 securitySettings.AddAccessRule(allowEveryoneRule);
 
-                _mutex = new Mutex(false, $"Global\\BlobStorage-{id}-WriteLock", out _, securitySettings);
+                _mutex = new Mutex(false, $"{(global ? "Global\\" : "")}BlobStorage-{id}-WriteLock", out _,
+                    securitySettings);
 
                 var semaphoreSecurity = new SemaphoreSecurity();
                 var semaphoreRule = new SemaphoreAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
                     SemaphoreRights.FullControl, AccessControlType.Allow);
                 semaphoreSecurity.AddAccessRule(semaphoreRule);
-                _semaphore = new Semaphore(SemaphoreCount, SemaphoreCount, $"Global\\BlobStorage-{id}-ReadLock", out _,
+                _semaphore = new Semaphore(SemaphoreCount, SemaphoreCount,
+                    $"{(global ? "Global\\" : "")}BlobStorage-{id}-ReadLock", out _,
                     semaphoreSecurity);
             }
 

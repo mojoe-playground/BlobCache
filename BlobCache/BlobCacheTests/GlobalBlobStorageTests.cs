@@ -3,6 +3,7 @@
     using System.IO;
     using System.Linq;
     using BlobCache;
+    using BlobCache.ConcurrencyModes;
     using Xunit;
 
     public class GlobalBlobStorageTests
@@ -11,7 +12,7 @@
         public async void AddChunk()
         {
             File.Delete("globaltest.blob");
-            using (var s = new GlobalBlobStorage("globaltest.blob"))
+            using (var s = new BlobStorage<SessionConcurrencyHandler>("globaltest.blob"))
             {
                 Assert.True(await s.Initialize());
 

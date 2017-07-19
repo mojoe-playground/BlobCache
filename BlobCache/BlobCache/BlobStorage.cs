@@ -6,11 +6,12 @@
     using System.Linq;
     using System.Text;
     using System.Threading.Tasks;
+    using ConcurrencyModes;
 
-    public class BlobStorage : IDisposable
+    public class BlobStorage<T> : IDisposable where T : ConcurrencyHandler, new()
     {
         private const int LastVersion = 1;
-        protected const int Timeout = 1000;
+        private const int Timeout = 1000;
 
         private const int HeaderSize = 24;
 
@@ -19,18 +20,23 @@
         public BlobStorage(string fileName)
         {
             Info = new FileInfo(fileName);
+            ConcurrencyHandler = new T();
         }
 
+        private T ConcurrencyHandler { get; }
+
         protected internal FileInfo Info { get; }
-        protected Guid Id { get; private set; }
+        private Guid Id { get; set; }
 
         public void Dispose()
         {
-            Dispose(true);
+            _mainLock?.Close();
+            _mainLock = null;
+            ConcurrencyHandler?.Dispose();
             GC.SuppressFinalize(this);
         }
 
-        public virtual async Task<bool> Initialize()
+        public async Task<bool> Initialize()
         {
             try
             {
@@ -337,14 +343,14 @@
             return new FileStream(Info.FullName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         }
 
-        protected virtual StorageInfo ReadInfo()
+        private StorageInfo ReadInfo()
         {
-            return LocalSyncData.ReadInfo(Id);
+            return ConcurrencyHandler.ReadInfo();
         }
 
-        protected virtual void WriteInfo(StorageInfo info)
+        private void WriteInfo(StorageInfo info)
         {
-            LocalSyncData.WriteInfo(Id, info);
+            ConcurrencyHandler.WriteInfo(info);
         }
 
         private void CheckBlobStorageHeader()
@@ -364,6 +370,7 @@
                 if (version > LastVersion)
                     throw new NotSupportedException("Unknown file version");
                 Id = new Guid(r.ReadBytes(16));
+                ConcurrencyHandler.Id = Id;
             }
         }
 
@@ -378,28 +385,19 @@
             }
         }
 
-        protected virtual IDisposable ReadLock(int timeout)
+        private IDisposable ReadLock(int timeout)
         {
-            var l = LocalSyncData.ReadWriteLock(Id);
-            return l.ReaderLock();
+            return ConcurrencyHandler.ReadLock(timeout);
         }
 
-        protected virtual IDisposable WriteLock(int timeout)
+        private IDisposable WriteLock(int timeout)
         {
-            var l = LocalSyncData.ReadWriteLock(Id);
-            return l.WriterLock();
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            _mainLock?.Close();
-            _mainLock = null;
-            LocalSyncData.ReleaseData(Id);
+            return ConcurrencyHandler.WriteLock(timeout);
         }
 
         ~BlobStorage()
         {
-            Dispose(false);
+            Dispose();
         }
 
         public Task<IReadOnlyList<StorageChunk>> GetChunks()
