@@ -29,15 +29,24 @@
                         if (_mmf != null)
                             return _mmf;
 
-                        _mmf = MemoryMappedFile.CreateOrOpen($"{(IsGlobal ? "Global\\" : "")}BlobStorage-{Id}-Info",
-                            1024 * 1024);
+                       _mmf = CreateMemoryMappedFile();
                     }
 
                 return _mmf;
             }
         }
 
-        protected bool IsGlobal { get; set; }
+        protected virtual MemoryMappedFile CreateMemoryMappedFile()
+        {
+            var security = new MemoryMappedFileSecurity();
+            var rule = new AccessRule<MemoryMappedFileRights>(new SecurityIdentifier(WellKnownSidType.WorldSid, null), MemoryMappedFileRights.FullControl, AccessControlType.Allow);
+            security.AddAccessRule(rule);
+
+            return MemoryMappedFile.CreateOrOpen($"{(IsGlobal ? "Global\\" : "")}BlobStorage-{Id}-Info",
+                1024 * 1024, MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.None, security, System.IO.HandleInheritability.None);
+        }
+
+        protected bool IsGlobal { get; set; } = false;
 
         private GlobalReaderWriterLocker ReaderWriterLock
         {
