@@ -12,7 +12,7 @@
         public async void AddChunk()
         {
             File.Delete("test.blob");
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test.blob"))
+            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.True(await s.Initialize());
 
@@ -31,7 +31,7 @@
         public async void ChunkIdReuse()
         {
             File.Delete("test.blob");
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test.blob"))
+            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.True(await s.Initialize());
 
@@ -54,7 +54,7 @@
         public async void FreeSpaceCombination()
         {
             File.Delete("test.blob");
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test.blob"))
+            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.True(await s.Initialize());
 
@@ -79,7 +79,7 @@
             }
 
             File.Delete("test.blob");
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test.blob"))
+            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.True(await s.Initialize());
 
@@ -108,7 +108,7 @@
         public async void GetChunks()
         {
             File.Delete("test.blob");
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test.blob"))
+            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.True(await s.Initialize());
 
@@ -131,18 +131,18 @@
         public async void Initialization()
         {
             File.Delete("test.blob");
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test.blob"))
+            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.True(await s.Initialize());
                 Assert.True(await s.Initialize());
             }
 
             File.Delete("test.blob");
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test.blob"))
+            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.True(await s.Initialize());
 
-                using (var s1 = new BlobStorage<AppDomainConcurrencyHandler>("test.blob"))
+                using (var s1 = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
                 {
                     Assert.True(await s1.Initialize());
                 }
@@ -150,7 +150,7 @@
 
             File.Delete("test2.blob");
             File.WriteAllText("test2.blob", "ab");
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test2.blob"))
+            using (var s = new BlobStorage("test2.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.False(await s.Initialize());
             }
@@ -158,7 +158,7 @@
             File.Delete("test2.blob");
             File.WriteAllText("test2.blob",
                 "ABCD234                                                                    ");
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test2.blob"))
+            using (var s = new BlobStorage("test2.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.False(await s.Initialize());
             }
@@ -166,7 +166,7 @@
             File.Delete("test2.blob");
             File.WriteAllText("test2.blob",
                 "BLOB234                                                                    ");
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test2.blob"))
+            using (var s = new BlobStorage("test2.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.False(await s.Initialize());
             }
@@ -175,7 +175,7 @@
         [Fact]
         public async void RemoveChunk()
         {
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test.blob"))
+            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.True(await s.Initialize());
 
@@ -197,7 +197,7 @@
         [Fact]
         public async void SpaceReuse()
         {
-            using (var s = new BlobStorage<AppDomainConcurrencyHandler>("test.blob"))
+            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
             {
                 Assert.True(await s.Initialize());
 

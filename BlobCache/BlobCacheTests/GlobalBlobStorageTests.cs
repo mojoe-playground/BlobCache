@@ -12,7 +12,7 @@
         public async void AddChunk()
         {
             File.Delete("globaltest.blob");
-            using (var s = new BlobStorage<SessionConcurrencyHandler>("globaltest.blob"))
+            using (var s = new BlobStorage("globaltest.blob", new SessionConcurrencyHandler()))
             {
                 Assert.True(await s.Initialize());
 

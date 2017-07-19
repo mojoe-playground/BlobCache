@@ -8,7 +8,7 @@
     using System.Threading.Tasks;
     using ConcurrencyModes;
 
-    public class BlobStorage<T> : IDisposable where T : ConcurrencyHandler, new()
+    public class BlobStorage : IDisposable
     {
         private const int LastVersion = 1;
 
@@ -16,13 +16,13 @@
 
         private Stream _mainLock;
 
-        public BlobStorage(string fileName)
+        public BlobStorage(string fileName, ConcurrencyHandler handler)
         {
             Info = new FileInfo(fileName);
-            ConcurrencyHandler = new T();
+            ConcurrencyHandler = handler;
         }
 
-        private T ConcurrencyHandler { get; }
+        private ConcurrencyHandler ConcurrencyHandler { get; }
 
         protected internal FileInfo Info { get; }
         private Guid Id { get; set; }
