@@ -469,7 +469,7 @@
             Dispose();
         }
 
-        public Task<IReadOnlyList<StorageChunk>> GetChunks()
+        internal Task<IReadOnlyList<StorageChunk>> GetChunks()
         {
             return Task.Run(() =>
             {
