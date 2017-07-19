@@ -9,10 +9,10 @@
         public uint Size { get; }
         public int Type { get; }
         public bool Changing { get; internal set; }
-        public int Id { get; }
-        public int UserData { get; }
+        public uint Id { get; }
+        public uint UserData { get; }
 
-        public StorageChunk(int id, int userData, int chunkType, long position, uint size)
+        public StorageChunk(uint id, uint userData, int chunkType, long position, uint size)
         {
             Id = id;
             Type = chunkType;
@@ -32,8 +32,8 @@
                 throw new InvalidDataException("No room in stream for chunk header");
 
             var t = reader.ReadInt32();
-            var i = reader.ReadInt32();
-            var d = reader.ReadInt32();
+            var i = reader.ReadUInt32();
+            var d = reader.ReadUInt32();
             var s = reader.ReadUInt32();
 
             if (p + s > reader.BaseStream.Length)
@@ -47,8 +47,8 @@
         {
             var p = reader.ReadInt64();
             var t = reader.ReadInt32();
-            var i = reader.ReadInt32();
-            var d = reader.ReadInt32();
+            var i = reader.ReadUInt32();
+            var d = reader.ReadUInt32();
             var s = reader.ReadUInt32();
 
             return new StorageChunk(i, d, t, p, s);
@@ -76,7 +76,7 @@
 
         public override int GetHashCode()
         {
-            return Id;
+            return (int)Id;
         }
 
         public static bool operator ==(StorageChunk left, StorageChunk right)

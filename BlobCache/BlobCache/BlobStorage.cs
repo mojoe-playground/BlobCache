@@ -96,7 +96,7 @@
             });
         }
 
-        public async Task<StorageChunk> AddChunk(int chunkType, int userData, byte[] data)
+        public async Task<StorageChunk> AddChunk(int chunkType, uint userData, byte[] data)
         {
             using (var ms = new MemoryStream(data))
             {
@@ -104,7 +104,7 @@
             }
         }
 
-        public Task<StorageChunk> AddChunk(int chunkType, int userData, Stream data)
+        public Task<StorageChunk> AddChunk(int chunkType, uint userData, Stream data)
         {
             return Task.Run(async () =>
             {
@@ -226,9 +226,9 @@
             });
         }
 
-        private int GetId(List<StorageChunk> chunks)
+        private uint GetId(List<StorageChunk> chunks)
         {
-            var id = 1;
+            var id = 1u;
             foreach (var c in chunks.OrderBy(c => c.Id))
                 if (c.Id > id)
                     break;
@@ -300,7 +300,7 @@
             });
         }
 
-        public Task<byte[]> ReadChunk(int id)
+        public Task<byte[]> ReadChunk(uint id)
         {
             return Task.Run(async () =>
             {

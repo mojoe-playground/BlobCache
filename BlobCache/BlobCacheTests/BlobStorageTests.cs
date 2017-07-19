@@ -18,8 +18,8 @@
 
                 var data = Enumerable.Range(0, 256).Select(r => (byte) 1).ToArray();
                 var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);
-                Assert.Equal(1, c1.Id);
-                Assert.Equal(11, c1.UserData);
+                Assert.Equal(1u, c1.Id);
+                Assert.Equal(11u, c1.UserData);
                 Assert.Equal((uint) data.Length, c1.Size);
 
                 var res = await s.ReadChunk(1);
@@ -181,7 +181,7 @@
 
                 var data = Enumerable.Range(0, 256).Select(r => (byte) 1).ToArray();
                 var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);
-                Assert.Equal(11, c1.UserData);
+                Assert.Equal(11u, c1.UserData);
                 Assert.Equal((uint) data.Length, c1.Size);
 
                 var res = await s.ReadChunk(c1.Id);
@@ -203,7 +203,7 @@
 
                 var data = Enumerable.Range(0, 256).Select(r => (byte) 1).ToArray();
                 var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);
-                Assert.Equal(11, c1.UserData);
+                Assert.Equal(11u, c1.UserData);
                 Assert.Equal((uint) data.Length, c1.Size);
 
                 var res = await s.ReadChunk(c1.Id);
@@ -211,7 +211,7 @@
 
                 data = Enumerable.Range(0, 256).Select(r => (byte) 2).ToArray();
                 var c2 = await s.AddChunk(ChunkTypes.Test, 12, data);
-                Assert.Equal(12, c2.UserData);
+                Assert.Equal(12u, c2.UserData);
                 Assert.Equal((uint) data.Length, c2.Size);
 
                 res = await s.ReadChunk(c2.Id);
@@ -223,7 +223,7 @@
 
                 data = Enumerable.Range(0, 128).Select(r => (byte) 3).ToArray();
                 var c3 = await s.AddChunk(ChunkTypes.Test, 13, data);
-                Assert.Equal(13, c3.UserData);
+                Assert.Equal(13u, c3.UserData);
                 Assert.Equal((uint) data.Length, c3.Size);
 
                 res = await s.ReadChunk(c3.Id);
