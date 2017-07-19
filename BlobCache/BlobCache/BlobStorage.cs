@@ -15,6 +15,8 @@
 
         private const int HeaderSize = 24;
 
+        private Stream _mainLock;
+
         public BlobStorage(string fileName)
         {
             Info = new FileInfo(fileName);
@@ -33,6 +35,9 @@
         {
             try
             {
+                _mainLock?.Close();
+                _mainLock = null;
+
                 if (!Info.Exists)
                     CreateEmptyBlobStorage();
 
@@ -62,7 +67,7 @@
                     return;
 
                 info.Chunks = new List<StorageChunk>();
-                using (var f = OpenRead())
+                using (var f = Open())
                 using (var br = new BinaryReader(f))
                 {
                     f.Position = 24;
@@ -104,7 +109,7 @@
             StorageChunk free;
             StorageChunk chunk;
 
-            using (var f = OpenWrite())
+            using (var f = Open())
             using (var w = new BinaryWriter(f))
             {
                 using (await WriteLock(Timeout))
@@ -224,7 +229,7 @@
 
         public async Task RemoveChunk(StorageChunk chunk)
         {
-            using (var f = OpenWrite())
+            using (var f = Open())
             using (var w = new BinaryWriter(f))
             {
                 using (await WriteLock(Timeout))
@@ -245,7 +250,8 @@
                     }
 
                     // Check previous chunk is free, combine free space
-                    var previousChunk = info.Chunks.Where(c=>c.Position < chunk.Position).OrderByDescending(c=>c.Position).FirstOrDefault();
+                    var previousChunk = info.Chunks.Where(c => c.Position < chunk.Position)
+                        .OrderByDescending(c => c.Position).FirstOrDefault();
 
                     if (previousChunk.Type == ChunkTypes.Free && !previousChunk.Changing)
                     {
@@ -294,7 +300,7 @@
 
         private async Task<byte[]> ReadChunk(StorageChunk chunk)
         {
-            using (var f = OpenRead())
+            using (var f = Open())
             {
                 var res = new byte[chunk.Size];
                 f.Position = chunk.Position + StorageChunk.ChunkHeaderSize;
@@ -312,12 +318,7 @@
             }
         }
 
-        private FileStream OpenRead()
-        {
-            return new FileStream(Info.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        }
-
-        private FileStream OpenWrite()
+        private FileStream Open()
         {
             return new FileStream(Info.FullName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         }
@@ -335,21 +336,21 @@
 
         private void CheckBlobStorageHeader()
         {
-            using (var f = OpenRead())
-            {
-                if (f.Length < HeaderSize)
-                    throw new NotSupportedException("Unknown file format (file too short)");
+            _mainLock?.Close();
+            _mainLock = Open();
 
-                using (var r = new BinaryReader(f, Encoding.UTF8))
-                {
-                    var blob = r.ReadInt32();
-                    if (blob != ChunkTypes.Blob)
-                        throw new NotSupportedException("Unknown file format");
-                    var version = r.ReadInt32();
-                    if (version > LastVersion)
-                        throw new NotSupportedException("Unknown file version");
-                    Id = new Guid(r.ReadBytes(16));
-                }
+            if (_mainLock.Length < HeaderSize)
+                throw new NotSupportedException("Unknown file format (file too short)");
+
+            using (var r = new BinaryReader(_mainLock, Encoding.UTF8, true))
+            {
+                var blob = r.ReadInt32();
+                if (blob != ChunkTypes.Blob)
+                    throw new NotSupportedException("Unknown file format");
+                var version = r.ReadInt32();
+                if (version > LastVersion)
+                    throw new NotSupportedException("Unknown file version");
+                Id = new Guid(r.ReadBytes(16));
             }
         }
 
@@ -383,6 +384,8 @@
 
         protected virtual void Dispose(bool disposing)
         {
+            _mainLock?.Close();
+            _mainLock = null;
             LocalSyncData.ReleaseData(Id);
         }
 
