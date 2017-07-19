@@ -11,6 +11,9 @@
 
     public class Cache : IDisposable
     {
+        private readonly Dictionary<string, List<CacheHead>> _headCache = new Dictionary<string, List<CacheHead>>();
+        private ulong _headCacheVersion;
+
         public Cache(string fileName)
             : this(new BlobStorage(fileName, new SessionConcurrencyHandler()))
         {
@@ -194,6 +197,9 @@
 
         private async Task<List<CacheHead>> Heads(string key)
         {
+            if (key == null)
+                key = string.Empty;
+
             var hash = 0u;
             if (!string.IsNullOrEmpty(key))
                 hash = GetHash(key);
@@ -201,15 +207,45 @@
             var res = new List<CacheHead>();
             var data = new List<StorageChunk>();
 
-            // Read all head records (matching the key is given) and store all data chunk info
+            var readFromCache = false;
+            // Read all head records (matching the key if given) and store all data chunk info
             var headData = await Storage.ReadChunks((sc, v) =>
             {
+                lock (_headCache)
+                {
+                    // Clear cache if cache version not current
+                    if (v != _headCacheVersion)
+                    {
+                        _headCacheVersion = v;
+                        _headCache.Clear();
+                    }
+
+                    // Check whether data is in the cache
+                    if (_headCache.ContainsKey(key) || _headCache.ContainsKey(string.Empty))
+                    {
+                        readFromCache = true;
+                        return null;
+                    }
+                }
+
                 data = sc.Where(c => c.Type == ChunkTypes.Data).ToList();
                 var heads = sc.Where(c => c.Type == ChunkTypes.Head);
                 if (!string.IsNullOrEmpty(key))
                     heads = heads.Where(c => c.UserData == hash);
                 return heads.ToList();
             });
+
+            // If data is in the cache return it from there
+            if (readFromCache)
+                lock (_headCache)
+                {
+                    if (_headCache.ContainsKey(key))
+                        // Return cached data if key is cached
+                        return _headCache[key].ToList();
+
+                    // Filter all heads list for the given key
+                    return _headCache[string.Empty].Where(h => KeyEquals(key, h.Key)).ToList();
+                }
 
             // Process loaded head records
             foreach (var h in headData)
@@ -226,6 +262,11 @@
                         .Select(c => data.First(ch => ch.Id == c)).ToList();
                     res.Add(head);
                 }
+
+            lock (_headCache)
+            {
+                _headCache[key] = res.ToList();
+            }
 
             return res;
         }
