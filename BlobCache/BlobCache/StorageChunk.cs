@@ -2,6 +2,7 @@
 {
     using System;
     using System.IO;
+    using System.Text;
 
     public struct StorageChunk: IEquatable<StorageChunk>
     {
@@ -87,6 +88,21 @@
         public static bool operator !=(StorageChunk left, StorageChunk right)
         {
             return !left.Equals(right);
+        }
+
+        public override string ToString()
+        {
+            var characters = BitConverter.GetBytes(Convert.ToUInt64(Type));
+            var sb = new StringBuilder();
+            sb.Append(Id);
+            sb.Append(" - ");
+            foreach (var ch in characters)
+                sb.Append(Convert.ToChar(ch));
+            sb.Append(" @");
+            sb.Append(Position);
+            sb.Append(", ");
+            sb.Append(Size);
+            return sb.ToString();
         }
     }
 }

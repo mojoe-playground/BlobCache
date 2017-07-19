@@ -7,6 +7,8 @@
         public static readonly int Free = FourCC("FREE");
         public static readonly int Test = FourCC("TEST");
         public static readonly int Blob = FourCC("BLOB");
+        public static readonly int Data = FourCC("DATA");
+        public static readonly int Head = FourCC("HEAD");
 
         // ReSharper disable InconsistentNaming
         private static int FourCC(string fourCC)

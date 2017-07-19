@@ -238,7 +238,7 @@
             return id;
         }
 
-        public Task RemoveChunk(StorageChunk chunk)
+        public Task<bool> RemoveChunk(StorageChunk chunk)
         {
             return Task.Run(async () =>
             {
@@ -248,6 +248,9 @@
                     using (WriteLock(ConcurrencyHandler.Timeout))
                     {
                         var info = ReadInfo();
+                        var chunk1 = chunk;
+                        if (!info.Chunks.Any(c => c.Id == chunk1.Id && c.Position == chunk1.Position && c.Size == chunk1.Size && c.Type == chunk1.Type && c.UserData == chunk1.UserData))
+                            return false;
 
                         var freeSize = chunk.Size;
                         var freePosition = chunk.Position;
@@ -297,6 +300,8 @@
 
                     WriteInfo(info);
                 }
+
+                return true;
             });
         }
 
@@ -408,6 +413,12 @@
                     return (IReadOnlyList<StorageChunk>) ReadInfo().Chunks;
                 }
             });
+        }
+
+        public async Task<IReadOnlyList<uint>> GetFreeChunkSizes()
+        {
+            var chunks = await GetChunks();
+            return chunks.Where(c => c.Type == ChunkTypes.Free).Select(c => c.Size).ToList();
         }
     }
 }
