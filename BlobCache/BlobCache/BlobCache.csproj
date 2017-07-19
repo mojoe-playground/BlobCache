@@ -67,10 +67,8 @@
   <ItemGroup>
     <Compile Include="BlobStorage.cs" />
     <Compile Include="ChunkTypes.cs" />
-    <Compile Include="GlobalBobStorage.cs" />
+    <Compile Include="GlobalBlobStorage.cs" />
     <Compile Include="LocalSyncData.cs" />
-    <Compile Include="Lockers\GlobalLocker.cs" />
-    <Compile Include="Lockers\LocalLocker.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="StorageChunk.cs" />
     <Compile Include="StorageInfo.cs" />

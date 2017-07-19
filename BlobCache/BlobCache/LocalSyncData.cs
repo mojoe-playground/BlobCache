@@ -71,7 +71,7 @@
 
         public static AsyncReaderWriterLock ReadWriteLock(Guid id)
         {
-            AsyncReaderWriterLock locker = null;
+            AsyncReaderWriterLock locker;
             lock (Data)
             {
                 if (!Data.ContainsKey(id))

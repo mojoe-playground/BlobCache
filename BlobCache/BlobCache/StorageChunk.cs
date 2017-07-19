@@ -43,6 +43,26 @@
             return new StorageChunk(i,d, t, p, s);
         }
 
+        public static StorageChunk FromStream(BinaryReader reader)
+        {
+            var p = reader.ReadInt64();
+            var t = reader.ReadInt32();
+            var i = reader.ReadInt32();
+            var d = reader.ReadInt32();
+            var s = reader.ReadUInt32();
+
+            return new StorageChunk(i, d, t, p, s);
+        }
+
+        public void ToStream(BinaryWriter writer)
+        {
+            writer.Write(Position);
+            writer.Write(Type);
+            writer.Write(Id);
+            writer.Write(UserData);
+            writer.Write(Size);
+        }
+
         public bool Equals(StorageChunk other)
         {
             return Id == other.Id;

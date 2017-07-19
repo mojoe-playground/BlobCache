@@ -1,0 +1,232 @@
+﻿namespace BlobCache
+{
+    using System;
+    using System.Diagnostics;
+    using System.IO.MemoryMappedFiles;
+    using System.Security.AccessControl;
+    using System.Security.Principal;
+    using System.Threading;
+
+    public class GlobalBlobStorage : BlobStorage
+    {
+        private readonly object _locker = new object();
+        private MemoryMappedFile _mmf;
+
+        private GlobalReaderWriterLocker _rwl;
+
+        public GlobalBlobStorage(string fileName)
+            : base(fileName)
+        {
+        }
+
+        private MemoryMappedFile Memory
+        {
+            get
+            {
+                if (_mmf == null)
+                    lock (_locker)
+                    {
+                        if (_mmf != null)
+                            return _mmf;
+
+                        _mmf = MemoryMappedFile.CreateOrOpen($"BlobStorage-{Id}-Info", 1024 * 1024);
+                    }
+
+                return _mmf;
+            }
+        }
+
+        private GlobalReaderWriterLocker ReaderWriterLock
+        {
+            get
+            {
+                if (_rwl == null)
+                    lock (_locker)
+                    {
+                        if (_rwl != null)
+                            return _rwl;
+
+                        _rwl = new GlobalReaderWriterLocker(Id);
+                    }
+
+                return _rwl;
+            }
+        }
+
+        protected override IDisposable ReadLock(int timeout)
+        {
+            return ReaderWriterLock.ReadLock(timeout);
+        }
+
+        protected override IDisposable WriteLock(int timeout)
+        {
+            return ReaderWriterLock.WriteLock(timeout);
+        }
+
+        protected override StorageInfo ReadInfo()
+        {
+            using (var s = Memory.CreateViewStream())
+            {
+                return StorageInfo.ReadFromStream(s);
+            }
+        }
+
+        protected override void WriteInfo(StorageInfo info)
+        {
+            using (var s = Memory.CreateViewStream())
+            {
+                info.WriteToStream(s);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            _mmf?.Dispose();
+            _mmf = null;
+            _rwl?.Dispose();
+            _rwl = null;
+        }
+
+        private class GlobalReaderWriterLocker : IDisposable
+        {
+            private const int SemaphoreCount = 25;
+
+            private readonly Mutex _mutex;
+            private readonly Semaphore _semaphore;
+
+            public GlobalReaderWriterLocker(Guid id)
+            {
+                var allowEveryoneRule = new MutexAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                    MutexRights.FullControl, AccessControlType.Allow);
+                var securitySettings = new MutexSecurity();
+                securitySettings.AddAccessRule(allowEveryoneRule);
+
+                _mutex = new Mutex(false, $"Global\\BlobStorage-{id}-WriteLock", out _, securitySettings);
+
+                var semaphoreSecurity = new SemaphoreSecurity();
+                var semaphoreRule = new SemaphoreAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                    SemaphoreRights.FullControl, AccessControlType.Allow);
+                semaphoreSecurity.AddAccessRule(semaphoreRule);
+                _semaphore = new Semaphore(SemaphoreCount, SemaphoreCount, $"Global\\BlobStorage-{id}-ReadLock", out _,
+                    semaphoreSecurity);
+            }
+
+            public void Dispose()
+            {
+                _mutex.Dispose();
+                _semaphore.Dispose();
+            }
+
+            public IDisposable ReadLock(int timeout)
+            {
+                var sw = new Stopwatch();
+                sw.Start();
+                var lockTaken = false;
+                try
+                {
+                    try
+                    {
+                        if (!_mutex.WaitOne(timeout))
+                            throw new TimeoutException();
+                        lockTaken = true;
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        lockTaken = true;
+                    }
+                    // Wait for a semaphore slot.
+                    if (!_semaphore.WaitOne(RealTimeout(timeout, sw)))
+                        throw new TimeoutException();
+
+                    return new LockRelease(null, _semaphore);
+                }
+                finally
+                {
+                    // Release mutex so others can access the semaphore.
+                    if (lockTaken)
+                        _mutex.ReleaseMutex();
+                }
+            }
+
+            public IDisposable WriteLock(int timeout)
+            {
+                var sw = new Stopwatch();
+                sw.Start();
+                var lockTaken = false;
+                try
+                {
+                    try
+                    {
+                        if (!_mutex.WaitOne(timeout))
+                            throw new TimeoutException();
+                        lockTaken = true;
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        lockTaken = true;
+                    }
+
+                    // Here we're waiting for the semaphore to get full,
+                    // meaning that there aren't any more readers accessing.
+                    // The only way to get the count is to call Release.
+                    // So we wait, then immediately release.
+                    // Release returns the previous count.
+                    // Since we know that access to the semaphore is locked
+                    // (i.e. nobody can get a slot), we know that when count
+                    // goes to one less than the total possible, all the readers
+                    // are done.
+                    if (!_semaphore.WaitOne(RealTimeout(timeout, sw)))
+                        throw new TimeoutException();
+
+                    var count = _semaphore.Release();
+                    while (count != SemaphoreCount - 1)
+                    {
+                        // sleep briefly so other processes get a chance.
+                        // You might want to tweak this value.  Sleep(1) might be okay.
+                        Thread.Sleep(10);
+                        if (!_semaphore.WaitOne(RealTimeout(timeout, sw)))
+                            throw new TimeoutException();
+                        count = _semaphore.Release();
+                    }
+
+                    // At this point, there are no more readers.
+                    lockTaken = false;
+                    return new LockRelease(_mutex, null);
+                }
+                finally
+                {
+                    // Release mutex so others can access the semaphore.
+                    if (lockTaken)
+                        _mutex.ReleaseMutex();
+                }
+            }
+
+            private int RealTimeout(int timeout, Stopwatch sw)
+            {
+                if (timeout <= 0)
+                    return timeout;
+
+                return (int) Math.Max(1, timeout - sw.ElapsedMilliseconds);
+            }
+
+            private class LockRelease : IDisposable
+            {
+                private readonly Mutex _mutex;
+                private readonly Semaphore _semaphore;
+
+                public LockRelease(Mutex mutex, Semaphore semaphore)
+                {
+                    _mutex = mutex;
+                    _semaphore = semaphore;
+                }
+
+                public void Dispose()
+                {
+                    _mutex?.ReleaseMutex();
+                    _semaphore?.Release();
+                }
+            }
+        }
+    }
+}

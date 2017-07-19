@@ -6,12 +6,11 @@
     using System.Linq;
     using System.Text;
     using System.Threading.Tasks;
-    using Lockers;
 
     public class BlobStorage : IDisposable
     {
         private const int LastVersion = 1;
-        private const int Timeout = 1000;
+        protected const int Timeout = 1000;
 
         private const int HeaderSize = 24;
 
@@ -57,36 +56,39 @@
             return true;
         }
 
-        private async Task CheckInitialization()
+        private Task CheckInitialization()
         {
-            using (await Lock(Timeout))
+            return Task.Run(() =>
             {
-                var info = await ReadInfo();
-
-                if (info.Initialized)
-                    return;
-
-                info.Chunks = new List<StorageChunk>();
-                using (var f = Open())
-                using (var br = new BinaryReader(f))
+                using (WriteLock(Timeout))
                 {
-                    f.Position = 24;
-                    var position = f.Position;
-                    while (f.Position != f.Length)
-                        try
-                        {
-                            position = f.Position;
-                            info.Chunks.Add(StorageChunk.FromStorage(br));
-                        }
-                        catch (InvalidDataException)
-                        {
-                            f.SetLength(position);
-                        }
-                }
+                    var info = ReadInfo();
 
-                info.Initialized = true;
-                await WriteInfo(info);
-            }
+                    if (info.Initialized)
+                        return;
+
+                    info.Chunks = new List<StorageChunk>();
+                    using (var f = Open())
+                    using (var br = new BinaryReader(f, Encoding.UTF8))
+                    {
+                        f.Position = 24;
+                        var position = f.Position;
+                        while (f.Position != f.Length)
+                            try
+                            {
+                                position = f.Position;
+                                info.Chunks.Add(StorageChunk.FromStorage(br));
+                            }
+                            catch (InvalidDataException)
+                            {
+                                f.SetLength(position);
+                            }
+                    }
+
+                    info.Initialized = true;
+                    WriteInfo(info);
+                }
+            });
         }
 
         public async Task<StorageChunk> AddChunk(int chunkType, int userData, byte[] data)
@@ -97,122 +99,126 @@
             }
         }
 
-        public async Task<StorageChunk> AddChunk(int chunkType, int userData, Stream data)
+        public Task<StorageChunk> AddChunk(int chunkType, int userData, Stream data)
         {
-            var l = data.Length;
-
-            if (l > uint.MaxValue)
-                throw new InvalidDataException("Chunk length greater than uint.MaxValue");
-
-            var size = (uint) l;
-
-            StorageChunk free;
-            StorageChunk chunk;
-
-            using (var f = Open())
-            using (var w = new BinaryWriter(f))
+            return Task.Run(async () =>
             {
-                using (await WriteLock(Timeout))
+                var l = data.Length;
+
+                if (l > uint.MaxValue)
+                    throw new InvalidDataException("Chunk length greater than uint.MaxValue");
+
+                var size = (uint) l;
+
+                StorageChunk free;
+                StorageChunk chunk;
+
+                using (var f = Open())
+                using (var w = new BinaryWriter(f, Encoding.UTF8))
                 {
-                    var info = await ReadInfo();
-
-                    // Check for exact size free chunk
-                    free = info.Chunks.FirstOrDefault(
-                        fc => !fc.Changing && fc.Size == size && fc.Type == ChunkTypes.Free);
-                    if (free.Type != ChunkTypes.Free)
-                        // Check for free chunk bigger than required
-                        free = info.Chunks.FirstOrDefault(
-                            fc => !fc.Changing && fc.Size > size + StorageChunk.ChunkHeaderSize &&
-                                  fc.Type == ChunkTypes.Free);
-
-                    if (free.Type == ChunkTypes.Free)
+                    using (WriteLock(Timeout))
                     {
-                        var position = free.Position;
-                        // if free space found in blob
-                        if (free.Size == size)
+                        var info = ReadInfo();
+
+                        // Check for exact size free chunk
+                        free = info.Chunks.FirstOrDefault(
+                            fc => !fc.Changing && fc.Size == size && fc.Type == ChunkTypes.Free);
+                        if (free.Type != ChunkTypes.Free)
+                            // Check for free chunk bigger than required
+                            free = info.Chunks.FirstOrDefault(
+                                fc => !fc.Changing && fc.Size > size + StorageChunk.ChunkHeaderSize &&
+                                      fc.Type == ChunkTypes.Free);
+
+                        if (free.Type == ChunkTypes.Free)
                         {
-                            // if chunk size equals with the free space size, replace free space with chunk
-                            chunk = new StorageChunk(free.Id, userData, chunkType, position, size) {Changing = true};
-                            info.Chunks[info.Chunks.IndexOf(free)] = chunk;
-                            free = default(StorageChunk);
+                            var position = free.Position;
+                            // if free space found in blob
+                            if (free.Size == size)
+                            {
+                                // if chunk size equals with the free space size, replace free space with chunk
+                                chunk = new StorageChunk(free.Id, userData, chunkType, position,
+                                    size) {Changing = true};
+                                info.Chunks[info.Chunks.IndexOf(free)] = chunk;
+                                free = default(StorageChunk);
+                            }
+                            else
+                            {
+                                // chunk size < free space size, remove chunk sized portion of the free space
+                                var index = info.Chunks.IndexOf(free);
+                                var remaining = free.Size - size - StorageChunk.ChunkHeaderSize;
+                                free = new StorageChunk(free.Id, 0, ChunkTypes.Free,
+                                        position + size + StorageChunk.ChunkHeaderSize, remaining)
+                                    {Changing = true};
+                                info.Chunks[index] = free;
+                                chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size)
+                                {
+                                    Changing = true
+                                };
+                                info.Chunks.Add(chunk);
+                            }
                         }
                         else
                         {
-                            // chunk size < free space size, remove chunk sized portion of the free space
-                            var index = info.Chunks.IndexOf(free);
-                            var remaining = free.Size - size - StorageChunk.ChunkHeaderSize;
-                            free = new StorageChunk(free.Id, 0, ChunkTypes.Free,
-                                    position + size + StorageChunk.ChunkHeaderSize, remaining)
-                                {Changing = true};
-                            info.Chunks[index] = free;
+                            // no space found, add chunk at the end of the file
+                            var last = info.Chunks.OrderByDescending(ch => ch.Position).FirstOrDefault();
+                            var position = last.Position == 0
+                                ? HeaderSize
+                                : last.Position + last.Size + StorageChunk.ChunkHeaderSize;
                             chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size)
                             {
                                 Changing = true
                             };
                             info.Chunks.Add(chunk);
+                            f.SetLength(position + StorageChunk.ChunkHeaderSize + size);
                         }
+
+                        WriteInfo(info);
                     }
-                    else
+
+                    // write chunk data to blob
+                    f.Position = chunk.Position;
+                    w.Write(ChunkTypes.Free);
+                    w.Write(chunk.Id);
+                    w.Write(chunk.UserData);
+                    w.Write(chunk.Size);
+                    await data.CopyToAsync(f);
+
+                    if (free.Changing)
                     {
-                        // no space found, add chunk at the end of the file
-                        var last = info.Chunks.OrderByDescending(ch => ch.Position).FirstOrDefault();
-                        var position = last.Position == 0
-                            ? HeaderSize
-                            : last.Position + last.Size + StorageChunk.ChunkHeaderSize;
-                        chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size)
-                        {
-                            Changing = true
-                        };
-                        info.Chunks.Add(chunk);
-                        f.SetLength(position + StorageChunk.ChunkHeaderSize + size);
+                        f.Position = free.Position;
+                        w.Write(free.Type);
+                        w.Write(free.Id);
+                        w.Write(free.UserData);
+                        w.Write(free.Size);
                     }
 
-                    await WriteInfo(info);
+                    await f.FlushAsync();
+
+                    f.Position = chunk.Position;
+                    w.Write(chunk.Type);
+                    await f.FlushAsync();
                 }
 
-                // write chunk data to blob
-                f.Position = chunk.Position;
-                w.Write(ChunkTypes.Free);
-                w.Write(chunk.Id);
-                w.Write(chunk.UserData);
-                w.Write(chunk.Size);
-                await data.CopyToAsync(f);
-
-                if (free.Changing)
+                using (WriteLock(Timeout))
                 {
-                    f.Position = free.Position;
-                    w.Write(free.Type);
-                    w.Write(free.Id);
-                    w.Write(free.UserData);
-                    w.Write(free.Size);
+                    var info = ReadInfo();
+
+                    var index = info.Chunks.IndexOf(chunk);
+                    chunk.Changing = false;
+                    info.Chunks[index] = chunk;
+
+                    if (free.Changing)
+                    {
+                        index = info.Chunks.IndexOf(free);
+                        free.Changing = false;
+                        info.Chunks[index] = free;
+                    }
+
+                    WriteInfo(info);
                 }
 
-                await f.FlushAsync();
-
-                f.Position = chunk.Position;
-                w.Write(chunk.Type);
-                await f.FlushAsync();
-            }
-
-            using (await WriteLock(Timeout))
-            {
-                var info = await ReadInfo();
-
-                var index = info.Chunks.IndexOf(chunk);
-                chunk.Changing = false;
-                info.Chunks[index] = chunk;
-
-                if (free.Changing)
-                {
-                    index = info.Chunks.IndexOf(free);
-                    free.Changing = false;
-                    info.Chunks[index] = free;
-                }
-
-                await WriteInfo(info);
-            }
-
-            return chunk;
+                return chunk;
+            });
         }
 
         private int GetId(List<StorageChunk> chunks)
@@ -227,75 +233,83 @@
             return id;
         }
 
-        public async Task RemoveChunk(StorageChunk chunk)
+        public Task RemoveChunk(StorageChunk chunk)
         {
-            using (var f = Open())
-            using (var w = new BinaryWriter(f))
+            return Task.Run(async () =>
             {
-                using (await WriteLock(Timeout))
+                using (var f = Open())
+                using (var w = new BinaryWriter(f, Encoding.UTF8))
                 {
-                    var info = await ReadInfo();
-
-                    var freeSize = chunk.Size;
-                    var freePosition = chunk.Position;
-
-                    // Check next chunk is free, combine free space
-                    var nextPos = chunk.Position + StorageChunk.ChunkHeaderSize + chunk.Size;
-                    var nextChunk = info.Chunks.FirstOrDefault(c => c.Position == nextPos);
-
-                    if (nextChunk.Type == ChunkTypes.Free && !nextChunk.Changing)
+                    using (WriteLock(Timeout))
                     {
-                        freeSize += StorageChunk.ChunkHeaderSize + nextChunk.Size;
-                        info.Chunks.Remove(nextChunk);
+                        var info = ReadInfo();
+
+                        var freeSize = chunk.Size;
+                        var freePosition = chunk.Position;
+
+                        // Check next chunk is free, combine free space
+                        var nextPos = chunk.Position + StorageChunk.ChunkHeaderSize + chunk.Size;
+                        var nextChunk = info.Chunks.FirstOrDefault(c => c.Position == nextPos);
+
+                        if (nextChunk.Type == ChunkTypes.Free && !nextChunk.Changing)
+                        {
+                            freeSize += StorageChunk.ChunkHeaderSize + nextChunk.Size;
+                            info.Chunks.Remove(nextChunk);
+                        }
+
+                        // Check previous chunk is free, combine free space
+                        var pos = chunk.Position;
+                        var previousChunk = info.Chunks.Where(c => c.Position < pos)
+                            .OrderByDescending(c => c.Position).FirstOrDefault();
+
+                        if (previousChunk.Type == ChunkTypes.Free && !previousChunk.Changing)
+                        {
+                            freeSize += StorageChunk.ChunkHeaderSize + previousChunk.Size;
+                            freePosition = previousChunk.Position;
+                            info.Chunks.Remove(previousChunk);
+                        }
+
+                        var index = info.Chunks.IndexOf(chunk);
+                        chunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition,
+                            freeSize) {Changing = true};
+                        info.Chunks[index] = chunk;
+
+                        WriteInfo(info);
                     }
 
-                    // Check previous chunk is free, combine free space
-                    var previousChunk = info.Chunks.Where(c => c.Position < chunk.Position)
-                        .OrderByDescending(c => c.Position).FirstOrDefault();
-
-                    if (previousChunk.Type == ChunkTypes.Free && !previousChunk.Changing)
-                    {
-                        freeSize += StorageChunk.ChunkHeaderSize + previousChunk.Size;
-                        freePosition = previousChunk.Position;
-                        info.Chunks.Remove(previousChunk);
-                    }
-
-                    var index = info.Chunks.IndexOf(chunk);
-                    chunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition, freeSize) {Changing = true};
-                    info.Chunks[index] = chunk;
-
-                    await WriteInfo(info);
+                    f.Position = chunk.Position;
+                    w.Write(ChunkTypes.Free);
+                    await f.FlushAsync();
                 }
 
-                f.Position = chunk.Position;
-                w.Write(ChunkTypes.Free);
-                await f.FlushAsync();
-            }
+                using (WriteLock(Timeout))
+                {
+                    var info = ReadInfo();
 
-            using (await WriteLock(Timeout))
-            {
-                var info = await ReadInfo();
+                    var index = info.Chunks.IndexOf(chunk);
+                    chunk.Changing = false;
+                    info.Chunks[index] = chunk;
 
-                var index = info.Chunks.IndexOf(chunk);
-                chunk.Changing = false;
-                info.Chunks[index] = chunk;
-
-                await WriteInfo(info);
-            }
+                    WriteInfo(info);
+                }
+            });
         }
 
-        public async Task<byte[]> ReadChunk(int id)
+        public Task<byte[]> ReadChunk(int id)
         {
-            StorageChunk chunk;
-
-            using (await ReadLock(Timeout))
+            return Task.Run(async () =>
             {
-                var info = await ReadInfo();
+                StorageChunk chunk;
 
-                chunk = info.Chunks.Single(c => c.Id == id);
-            }
+                using (ReadLock(Timeout))
+                {
+                    var info = ReadInfo();
 
-            return await ReadChunk(chunk);
+                    chunk = info.Chunks.Single(c => c.Id == id);
+                }
+
+                return await ReadChunk(chunk);
+            });
         }
 
         private async Task<byte[]> ReadChunk(StorageChunk chunk)
@@ -323,15 +337,14 @@
             return new FileStream(Info.FullName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         }
 
-        protected virtual Task<StorageInfo> ReadInfo()
+        protected virtual StorageInfo ReadInfo()
         {
-            return Task.FromResult(LocalSyncData.ReadInfo(Id));
+            return LocalSyncData.ReadInfo(Id);
         }
 
-        protected virtual Task WriteInfo(StorageInfo info)
+        protected virtual void WriteInfo(StorageInfo info)
         {
             LocalSyncData.WriteInfo(Id, info);
-            return Task.CompletedTask;
         }
 
         private void CheckBlobStorageHeader()
@@ -365,21 +378,16 @@
             }
         }
 
-        protected virtual Task<IDisposable> Lock(int timeout)
-        {
-            return Task.FromResult<IDisposable>(new LocalLocker(Id, timeout));
-        }
-
-        protected virtual async Task<IDisposable> ReadLock(int timeout)
+        protected virtual IDisposable ReadLock(int timeout)
         {
             var l = LocalSyncData.ReadWriteLock(Id);
-            return await l.ReaderLockAsync();
+            return l.ReaderLock();
         }
 
-        protected virtual async Task<IDisposable> WriteLock(int timeout)
+        protected virtual IDisposable WriteLock(int timeout)
         {
             var l = LocalSyncData.ReadWriteLock(Id);
-            return await l.WriterLockAsync();
+            return l.WriterLock();
         }
 
         protected virtual void Dispose(bool disposing)
@@ -394,15 +402,15 @@
             Dispose(false);
         }
 
-        public async Task<IReadOnlyList<StorageChunk>> GetChunks()
+        public Task<IReadOnlyList<StorageChunk>> GetChunks()
         {
-            List<StorageChunk> res;
-            using (await ReadLock(Timeout))
+            return Task.Run(() =>
             {
-                res = (await ReadInfo()).Chunks;
-            }
-
-            return res;
+                using (ReadLock(Timeout))
+                {
+                    return (IReadOnlyList<StorageChunk>) ReadInfo().Chunks;
+                }
+            });
         }
     }
 }
