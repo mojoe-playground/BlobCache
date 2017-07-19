@@ -209,6 +209,7 @@
                         info.Chunks[index] = free;
                     }
 
+                    info.Version++;
                     WriteInfo(info);
                 }
 
@@ -228,7 +229,7 @@
             return id;
         }
 
-        public Task RemoveChunk(Func<IReadOnlyList<StorageChunk>, StorageChunk?> selector)
+        public Task RemoveChunk(Func<IReadOnlyList<StorageChunk>, ulong, StorageChunk?> selector)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
@@ -253,7 +254,9 @@
                             var info = ReadInfo();
 
                             // Get the chunk to delete
-                            var item = selector.Invoke(info.Chunks.Where(c => c.Type != ChunkTypes.Free && !c.Changing).ToList());
+                            var item = selector.Invoke(
+                                info.Chunks.Where(c => c.Type != ChunkTypes.Free && !c.Changing).ToList(),
+                                info.Version);
                             if (item == null || item.Value == default(StorageChunk))
                                 return;
 
@@ -299,6 +302,7 @@
                                 {Changing = true};
                             info.Chunks[index] = chunk;
 
+                            info.Version++;
                             WriteInfo(info);
                         }
 
@@ -325,7 +329,7 @@
         }
 
         public Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(
-            Func<IReadOnlyList<StorageChunk>, IEnumerable<StorageChunk>> selector)
+            Func<IReadOnlyList<StorageChunk>, ulong, IEnumerable<StorageChunk>> selector)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
@@ -340,7 +344,7 @@
                     var info = ReadInfo();
                     var chunks = info.Chunks.Where(c => !c.Changing && c.Type != ChunkTypes.Free).ToList();
 
-                    chunksToRead = selector.Invoke(chunks)?.ToList();
+                    chunksToRead = selector.Invoke(chunks, info.Version)?.ToList();
                     if (chunksToRead == null)
                         return res;
 

@@ -7,10 +7,7 @@
     public struct StorageInfo
     {
         public bool Initialized { get; set; }
-        public int ReaderCount { get; set; }
-        public int QueuedReaderCount { get; set; }
-        public int WriterCount { get; set; }
-        public int QueuedWriterCount { get; set; }
+        public ulong Version { get; set; }
         public List<StorageChunk> Chunks { get; set; }
 
         public static StorageInfo ReadFromStream(Stream stream)
@@ -18,10 +15,7 @@
             using (var r = new BinaryReader(stream, Encoding.UTF8))
             {
                 var i = r.ReadBoolean();
-                var rc = r.ReadInt32();
-                var qrc = r.ReadInt32();
-                var wc = r.ReadInt32();
-                var qwc = r.ReadInt32();
+                var v = r.ReadUInt64();
                 var count = r.ReadInt32();
 
                 var list = new List<StorageChunk>();
@@ -31,10 +25,7 @@
                 return new StorageInfo
                 {
                     Initialized = i,
-                    ReaderCount = rc,
-                    QueuedReaderCount = qrc,
-                    WriterCount = wc,
-                    QueuedWriterCount = qwc,
+                    Version = v,
                     Chunks = list
                 };
             }
@@ -45,10 +36,7 @@
             using (var w = new BinaryWriter(stream, Encoding.UTF8))
             {
                 w.Write(Initialized);
-                w.Write(ReaderCount);
-                w.Write(QueuedReaderCount);
-                w.Write(WriterCount);
-                w.Write(QueuedWriterCount);
+                w.Write(Version);
                 w.Write(Chunks.Count);
                 foreach (var c in Chunks)
                     c.ToStream(w);
