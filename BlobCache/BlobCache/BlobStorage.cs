@@ -16,6 +16,11 @@
 
         private Stream _mainLock;
 
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="BlobStorage" /> class
+        /// </summary>
+        /// <param name="fileName">Blob storage file name</param>
+        /// <param name="handler">Concurrency mode to use</param>
         public BlobStorage(string fileName, ConcurrencyHandler handler)
         {
             Info = new FileInfo(fileName);
@@ -24,9 +29,16 @@
 
         private ConcurrencyHandler ConcurrencyHandler { get; }
 
+        /// <summary>
+        ///     Gets the blob storage file info
+        /// </summary>
         protected internal FileInfo Info { get; }
+
         private Guid Id { get; set; }
 
+        /// <summary>
+        ///     Disposes the storage
+        /// </summary>
         public void Dispose()
         {
             _mainLock?.Close();
@@ -35,6 +47,10 @@
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>
+        ///     Initialize the storage
+        /// </summary>
+        /// <returns>True if initialization successful, otherwise false</returns>
         public async Task<bool> Initialize()
         {
             try
@@ -96,6 +112,13 @@
             });
         }
 
+        /// <summary>
+        ///     Adds a chunk to the blob
+        /// </summary>
+        /// <param name="chunkType">Chunk type</param>
+        /// <param name="userData">Chunk user data</param>
+        /// <param name="data">bytes to add</param>
+        /// <returns>StorageChunk of the added chunk</returns>
         public async Task<StorageChunk> AddChunk(int chunkType, uint userData, byte[] data)
         {
             using (var ms = new MemoryStream(data))
@@ -104,6 +127,13 @@
             }
         }
 
+        /// <summary>
+        ///     Adds a chunk to the blob
+        /// </summary>
+        /// <param name="chunkType">Chunk type</param>
+        /// <param name="userData">Chunk user data</param>
+        /// <param name="data">Stream to add</param>
+        /// <returns>StorageChunk of the added chunk</returns>
         public Task<StorageChunk> AddChunk(int chunkType, uint userData, Stream data)
         {
             return Task.Run(async () =>
@@ -142,7 +172,8 @@
                             {
                                 // if chunk size equals with the free space size, replace free space with chunk
                                 chunk = new StorageChunk(free.Id, userData, chunkType, position,
-                                    size) {Changing = true};
+                                        size)
+                                    {Changing = true};
                                 info.Chunks[info.Chunks.IndexOf(free)] = chunk;
                                 free = default(StorageChunk);
                             }
@@ -229,6 +260,14 @@
             return id;
         }
 
+        /// <summary>
+        ///     Removes a chunk from the blob
+        /// </summary>
+        /// <param name="selector">
+        ///     Selector to choose which chunk to remove, input: available chunks, chunk data version, output:
+        ///     chunk to remove (null to cancel)
+        /// </param>
+        /// <returns>Task</returns>
         public Task RemoveChunk(Func<IReadOnlyList<StorageChunk>, ulong, StorageChunk?> selector)
         {
             if (selector == null)
@@ -328,8 +367,42 @@
             });
         }
 
-        public Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(
+        /// <summary>
+        ///     Reads chunks from the blob
+        /// </summary>
+        /// <param name="selector">
+        ///     Selector to choose which chunks to read, input: available chunks, chunk data version, output:
+        ///     chunks to read
+        /// </param>
+        /// <param name="streamCreator">
+        ///     Stream creator to create the output streams for the data, input: chunk read, output: stream
+        ///     to use, value indicating whether the stream should be closed or not
+        /// </param>
+        /// <returns></returns>
+        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(
+            Func<IReadOnlyList<StorageChunk>, ulong, IEnumerable<StorageChunk>> selector,
+            Func<StorageChunk, (Stream, bool)> streamCreator)
+        {
+            return (await ReadChunksInternal(selector, streamCreator)).Select(r => (r.Chunk, r.Stream)).ToList();
+        }
+
+        /// <summary>
+        ///     Reads chunks from the blob
+        /// </summary>
+        /// <param name="selector">
+        ///     Selector to choose which chunks to read, input: available chunks, chunk data version, output:
+        ///     chunks to read
+        /// </param>
+        /// <returns>List of chunk, byte[] pairs</returns>
+        public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(
             Func<IReadOnlyList<StorageChunk>, ulong, IEnumerable<StorageChunk>> selector)
+        {
+            return (await ReadChunksInternal(selector, null)).Select(r => (r.Chunk, r.Data)).ToList();
+        }
+
+        private Task<List<(StorageChunk Chunk, byte[] Data, Stream Stream)>> ReadChunksInternal(
+            Func<IReadOnlyList<StorageChunk>, ulong, IEnumerable<StorageChunk>> selector,
+            Func<StorageChunk, (Stream, bool)> streamCreator)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
@@ -337,7 +410,7 @@
             return Task.Run(async () =>
             {
                 List<StorageChunk> chunksToRead;
-                var res = new List<(StorageChunk, byte[])>();
+                var res = new List<(StorageChunk, byte[], Stream)>();
 
                 using (WriteLock(ConcurrencyHandler.Timeout))
                 {
@@ -363,7 +436,22 @@
                 try
                 {
                     foreach (var r in chunksToRead)
-                        res.Add((r, await ReadChunk(r)));
+                    {
+                        Stream stream = null;
+                        var close = false;
+
+                        if (streamCreator != null)
+                            (stream, close) = streamCreator.Invoke(r);
+                        try
+                        {
+                            res.Add(await ReadChunk(r, stream));
+                        }
+                        finally
+                        {
+                            if (close)
+                                stream?.Close();
+                        }
+                    }
                 }
                 finally
                 {
@@ -387,27 +475,30 @@
                 if (finishedOne)
                     ConcurrencyHandler.SignalReadFinish();
 
-                return (IReadOnlyList<(StorageChunk, byte[])>) res;
+                return res;
             });
         }
 
-        private async Task<byte[]> ReadChunk(StorageChunk chunk)
+        private async Task<(StorageChunk, byte[], Stream)> ReadChunk(StorageChunk chunk, Stream target)
         {
             using (var f = Open())
             {
-                var res = new byte[chunk.Size];
+                var res = new byte[target == null ? chunk.Size : Math.Min(chunk.Size, 64 * 1024)];
                 f.Position = chunk.Position + StorageChunk.ChunkHeaderSize;
 
                 var position = 0;
                 var read = 1;
 
-                while (position < res.Length && read != 0)
+                while (position < chunk.Size && read != 0)
                 {
-                    read = await f.ReadAsync(res, position, res.Length - position);
+                    read = await f.ReadAsync(res, position, (int) Math.Min(res.Length, chunk.Size - position));
                     position += read;
+
+                    if (target != null)
+                        await target.WriteAsync(res, 0, read);
                 }
 
-                return res;
+                return (chunk, res, target);
             }
         }
 
@@ -484,6 +575,10 @@
             });
         }
 
+        /// <summary>
+        ///     Gets the free chunk sizes
+        /// </summary>
+        /// <returns>Free chunk sizes in the blob</returns>
         public async Task<IReadOnlyList<uint>> GetFreeChunkSizes()
         {
             var chunks = await GetChunks();
