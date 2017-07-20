@@ -103,6 +103,38 @@
             return !string.IsNullOrEmpty((await ValidHead(key)).Key);
         }
 
+        public async Task<bool> Get(string key, Stream target)
+        {
+            var hash = GetHash(key);
+            var head = await ValidHead(key);
+
+            if (string.IsNullOrEmpty(head.Key))
+                return false;
+
+            if (head.Length == 0)
+                return true;
+
+            var chunks = await Storage.ReadChunks(sc =>
+            {
+                var list = new List<(StorageChunk, Stream)>();
+                foreach (var id in head.Chunks)
+                {
+                    var chunk = sc.Chunks.FirstOrDefault(c => c.Id == id);
+                    if (chunk.UserData != hash || chunk.Type != ChunkTypes.Data)
+                        return null;
+
+                    list.Add((chunk, target));
+                }
+
+                return list;
+            });
+
+            if (chunks.Count == 0)
+                return false;
+
+            return true;
+        }
+
         public async Task<byte[]> Get(string key)
         {
             var hash = GetHash(key);
@@ -112,23 +144,33 @@
                 return null;
 
             var result = new byte[head.Length];
+            if (head.Length == 0)
+                return result;
+
             var position = 0;
 
             var chunks = await Storage.ReadChunks(sc =>
             {
-                var list = sc.Chunks.Where(c => head.Chunks.Contains(c.Id)).ToList();
+                var list = new List<StorageChunk>();
+                foreach (var id in head.Chunks)
+                {
+                    var chunk = sc.Chunks.FirstOrDefault(c => c.Id == id);
+                    if (chunk.UserData != hash || chunk.Type != ChunkTypes.Data)
+                        return null;
 
-                if (list.Any(c => c.UserData != hash || c.Type != ChunkTypes.Data))
-                    return null;
+                    list.Add(chunk);
+                }
 
                 return list;
             });
 
-            foreach (var c in head.Chunks)
+            if (chunks.Count == 0)
+                return null;
+
+            foreach (var c in chunks)
             {
-                var data = chunks.First(ch => ch.Chunk.Id == c).Data;
-                Array.Copy(data, 0, result, position, data.Length);
-                position += data.Length;
+                Array.Copy(c.Data, 0, result, position, c.Data.Length);
+                position += c.Data.Length;
             }
 
             return result;

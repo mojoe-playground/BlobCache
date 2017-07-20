@@ -232,7 +232,11 @@
         ///     Stream creator to create the output streams for the data, input: chunk read, output: stream
         ///     to use
         /// </param>
-        /// <returns>List of chunk, Stream pairs</returns>
+        /// <returns>List of chunk, Stream pairs in the order of the selector's result</returns>
+        /// <remarks>
+        ///     Chunks written to streams in the order of the selector's result, if multiple chunks are using the same stream
+        ///     the data is written in the selector's result order
+        /// </remarks>
         public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator)
         {
             return (await ReadChunksInternal(selector, streamCreator)).Select(r => (r.Chunk, r.Stream)).ToList();
@@ -245,7 +249,11 @@
         ///     Selector to select which chunks need to be read to which stream, input: available storage info, output:
         ///     chunks to read with streams to read to
         /// </param>
-        /// <returns>List of chunk, Stream pairs</returns>
+        /// <returns>List of chunk, Stream pairs in the order of the selector's result</returns>
+        /// <remarks>
+        ///     Chunks written to streams in the order of the selector's result, if multiple chunks are using the same stream
+        ///     the data is written in the selector's result order
+        /// </remarks>
         public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<(StorageChunk, Stream)>> selector)
         {
             var streamList = new Dictionary<StorageChunk, Stream>();
@@ -307,7 +315,7 @@
         ///     Selector to choose which chunks to read, input: storage info, chunk data version, output:
         ///     chunks to read
         /// </param>
-        /// <returns>List of chunk, byte[] pairs</returns>
+        /// <returns>List of chunk, byte[] pairs in the order of the selector's result</returns>
         public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector)
         {
             return (await ReadChunksInternal(selector, null)).Select(r => (r.Chunk, r.Data)).ToList();
@@ -534,7 +542,7 @@
 
                 while (position < chunk.Size && read != 0)
                 {
-                    read = await f.ReadAsync(res, position, (int)Math.Min(res.Length, chunk.Size - position));
+                    read = await f.ReadAsync(res, 0, (int)Math.Min(res.Length, chunk.Size - position));
                     position += read;
 
                     if (target != null)
