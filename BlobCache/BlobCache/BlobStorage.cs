@@ -177,6 +177,42 @@
         }
 
         /// <summary>
+        ///     Cuts the excess free space from the end of the storage
+        /// </summary>
+        /// <returns>Task</returns>
+        public Task CutBackPadding()
+        {
+            return Task.Run(() =>
+            {
+                using (var f = Open())
+                {
+                    using (WriteLock(ConcurrencyHandler.Timeout))
+                    {
+                        var info = ReadInfo();
+
+                        var position = f.Length;
+                        while (info.ChunkList.Count > 0)
+                        {
+                            var chunk = info.ChunkList.Last();
+
+                            if (chunk.Type != ChunkTypes.Free || chunk.Changing)
+                                break;
+
+                            info.ChunkList.RemoveAt(info.ChunkList.Count - 1);
+                            position = chunk.Position;
+                        }
+
+                        if (position == f.Length)
+                            return;
+
+                        f.SetLength(position);
+                        WriteInfo(info);
+                    }
+                }
+            });
+        }
+
+        /// <summary>
         ///     Disposes the storage
         /// </summary>
         public void Dispose()

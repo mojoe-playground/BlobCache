@@ -5,6 +5,7 @@
     using BlobCache;
     using BlobCache.ConcurrencyModes;
     using Xunit;
+    using System.Linq;
 
     public class CacheTests
     {
@@ -38,6 +39,33 @@
                 Assert.False(await c.Exists("xunit.core.xml"));
                 await c.Add("xunit.core.xml", DateTime.MinValue, File.ReadAllBytes("xunit.core.xml"));
                 Assert.False(await c.Exists("xunit.core.xml"));
+            }
+        }
+
+        [Fact]
+        public async void Cleanup()
+        {
+            File.Delete("cache.blob");
+            var storage = new BlobStorage("cache.blob");
+            await storage.Initialize<AppDomainConcurrencyHandler>();
+            using (var c = new Cache(storage))
+            {
+                c.CleanupTime = () => DateTime.UtcNow.AddDays(2);
+                Assert.True(await c.Initialize());
+
+                await c.Add("xunit.core.xml", DateTime.MaxValue, File.ReadAllBytes("xunit.core.xml"));
+                await c.Add("xunit.assert.xml", DateTime.UtcNow.AddMinutes(2), File.ReadAllBytes("xunit.assert.xml"));
+                await storage.AddChunk(ChunkTypes.Data, 8, new byte[] { 1, 2, 3 });
+
+                storage.Info.Refresh();
+                var length = storage.Info.Length;
+                await c.Cleanup();
+
+                var chunks = await storage.GetChunks();
+                Assert.Equal(1, chunks.Count(ch => ch.Type == ChunkTypes.Head));
+                Assert.Equal(1, chunks.Count(ch => ch.Type == ChunkTypes.Data));
+                storage.Info.Refresh();
+                Assert.True(length > storage.Info.Length);
             }
         }
 

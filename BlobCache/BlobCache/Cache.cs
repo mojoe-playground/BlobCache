@@ -98,6 +98,12 @@
         }
 
         /// <summary>
+        /// Gets the reference time used for cleanup
+        /// </summary>
+        /// <remarks>Used in tests to simulate old data in storages</remarks>
+        internal Func<DateTime> CleanupTime = () => DateTime.UtcNow;
+
+        /// <summary>
         ///     Optimizes storage, removes dead data
         /// </summary>
         /// <returns>Task</returns>
@@ -107,7 +113,7 @@
             {
                 var heads = await Heads(null);
 
-                var now = DateTime.UtcNow;
+                var now = CleanupTime();
 
                 // Find invalid headers and remove the record
                 var badHeaders = heads.Where(h => h.TimeToLive < now || h.ValidChunks.Count != h.Chunks.Count).ToList();
@@ -122,8 +128,10 @@
                 var chunks = await Storage.GetChunks();
 
                 // Remove data chunks not belonging to good headers and added more than a day ago
-                foreach (var c in chunks.Where(ch => ch.Type == ChunkTypes.Data && ch.Added < oldDataCutoff && !goodData.ContainsKey(ch.Id) && !ch.Changing))
+                foreach (var c in chunks.Where(ch => ch.Type == ChunkTypes.Data && ch.Added < oldDataCutoff && !goodData.ContainsKey(ch.Id) && !ch.Changing).ToList())
                     await Storage.RemoveChunk(sc => sc.Chunks.FirstOrDefault(ch => ch.Id == c.Id && ch.Type == c.Type && ch.Position == c.Position && ch.Size == c.Size && ch.UserData == c.UserData));
+
+                await Storage.CutBackPadding();
             });
         }
 
