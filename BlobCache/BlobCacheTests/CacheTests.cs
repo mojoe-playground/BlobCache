@@ -12,7 +12,7 @@
         public async void Add()
         {
             File.Delete("cache.blob");
-            using (var c = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
+            using (var c = new Cache("cache.blob"))
             {
                 Assert.True(await c.Initialize());
 
@@ -25,7 +25,9 @@
         public async void Exists()
         {
             File.Delete("cache.blob");
-            using (var c = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
+            var storage = new BlobStorage("cache.blob");
+            await storage.Initialize<AppDomainConcurrencyHandler>();
+            using (var c = new Cache(storage))
             {
                 Assert.True(await c.Initialize());
 
@@ -43,7 +45,9 @@
         public async void Get()
         {
             File.Delete("cache.blob");
-            using (var c = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
+            var storage = new BlobStorage("cache.blob");
+            await storage.Initialize<AppDomainConcurrencyHandler>();
+            using (var c = new Cache(storage))
             {
                 Assert.True(await c.Initialize());
 
@@ -61,8 +65,8 @@
         public async void Multi()
         {
             File.Delete("cache.blob");
-            using (var c1 = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
-            using (var c2 = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
+            using (var c1 = new Cache(new BlobStorage("cache.blob")))
+            using (var c2 = new Cache(new BlobStorage("cache.blob")))
             {
                 Assert.True(await c1.Initialize());
                 Assert.True(await c2.Initialize());
@@ -78,7 +82,9 @@
         public async void Overwrite()
         {
             File.Delete("cache.blob");
-            using (var c = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
+            var storage = new BlobStorage("cache.blob");
+            await storage.Initialize<AppDomainConcurrencyHandler>();
+            using (var c = new Cache(storage))
             {
                 Assert.True(await c.Initialize());
 
@@ -96,7 +102,9 @@
         public async void Remove()
         {
             File.Delete("cache.blob");
-            using (var c = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
+            var storage = new BlobStorage("cache.blob");
+            await storage.Initialize<AppDomainConcurrencyHandler>();
+            using (var c = new Cache(storage))
             {
                 Assert.True(await c.Initialize());
 

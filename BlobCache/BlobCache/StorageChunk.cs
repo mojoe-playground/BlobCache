@@ -12,7 +12,7 @@
         public bool Changing { get; internal set; }
         public uint Id { get; }
         public uint UserData { get; }
-        public int ReadCount { get; set; }
+        public int ReadCount { get; internal set; }
 
         internal StorageChunk(uint id, uint userData, int chunkType, long position, uint size)
         {

@@ -12,9 +12,9 @@
         public async void AddChunk()
         {
             File.Delete("globaltest.blob");
-            using (var s = new BlobStorage("globaltest.blob", new SessionConcurrencyHandler()))
+            using (var s = new BlobStorage("globaltest.blob"))
             {
-                Assert.True(await s.Initialize());
+                Assert.True(await s.Initialize<SessionConcurrencyHandler>());
 
                 var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
                 var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);

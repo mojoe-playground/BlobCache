@@ -19,11 +19,9 @@
         ///     Initializes a new instance of the <see cref="BlobStorage" /> class
         /// </summary>
         /// <param name="fileName">Blob storage file name</param>
-        /// <param name="handler">Concurrency mode to use</param>
-        public BlobStorage(string fileName, ConcurrencyHandler handler)
+        public BlobStorage(string fileName)
         {
             Info = new FileInfo(fileName);
-            ConcurrencyHandler = handler;
         }
 
         ~BlobStorage()
@@ -31,7 +29,7 @@
             Dispose();
         }
 
-        private ConcurrencyHandler ConcurrencyHandler { get; }
+        private ConcurrencyHandler ConcurrencyHandler { get; set; }
 
         private Guid Id { get; set; }
 
@@ -193,10 +191,13 @@
         ///     Initialize the storage
         /// </summary>
         /// <returns>True if initialization successful, otherwise false</returns>
-        public async Task<bool> Initialize()
+        public async Task<bool> Initialize<T>() where T:ConcurrencyHandler, new()
         {
             try
             {
+                if (ConcurrencyHandler == null)
+                    ConcurrencyHandler = new T();
+
                 _mainLock?.Close();
                 _mainLock = null;
 

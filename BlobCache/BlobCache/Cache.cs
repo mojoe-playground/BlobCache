@@ -15,7 +15,7 @@
         private ulong _headCacheVersion;
 
         public Cache(string fileName)
-            : this(new BlobStorage(fileName, new SessionConcurrencyHandler()))
+            : this(new BlobStorage(fileName))
         {
         }
 
@@ -137,7 +137,7 @@
 
         public async Task<bool> Initialize()
         {
-            return await Storage.Initialize();
+            return await Storage.Initialize<SessionConcurrencyHandler>();
         }
 
         public async Task<bool> Remove(string key)

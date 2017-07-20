@@ -12,9 +12,9 @@
         public async void AddChunk()
         {
             File.Delete("test.blob");
-            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test.blob"))
             {
-                Assert.True(await s.Initialize());
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>());
 
                 var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
                 var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);
@@ -31,9 +31,9 @@
         public async void ChunkIdReuse()
         {
             File.Delete("test.blob");
-            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test.blob"))
             {
-                Assert.True(await s.Initialize());
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>());
 
                 var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
                 var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);
@@ -54,9 +54,9 @@
         public async void FreeSpaceCombination()
         {
             File.Delete("test.blob");
-            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test.blob"))
             {
-                Assert.True(await s.Initialize());
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>());
 
                 var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
                 var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);
@@ -79,9 +79,9 @@
             }
 
             File.Delete("test.blob");
-            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test.blob"))
             {
-                Assert.True(await s.Initialize());
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>());
 
                 var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
                 var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);
@@ -108,9 +108,9 @@
         public async void GetChunks()
         {
             File.Delete("test.blob");
-            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test.blob"))
             {
-                Assert.True(await s.Initialize());
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>());
 
                 Assert.Empty(await s.GetChunks());
 
@@ -131,53 +131,53 @@
         public async void Initialization()
         {
             File.Delete("test.blob");
-            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test.blob"))
             {
-                Assert.True(await s.Initialize());
-                Assert.True(await s.Initialize());
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>());
+                Assert.True(await s.Initialize<SessionConcurrencyHandler>());
             }
 
             File.Delete("test.blob");
-            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test.blob"))
             {
-                Assert.True(await s.Initialize());
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>());
 
-                using (var s1 = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
+                using (var s1 = new BlobStorage("test.blob"))
                 {
-                    Assert.True(await s1.Initialize());
+                    Assert.True(await s1.Initialize<AppDomainConcurrencyHandler>());
                 }
             }
 
             File.Delete("test2.blob");
             File.WriteAllText("test2.blob", "ab");
-            using (var s = new BlobStorage("test2.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test2.blob"))
             {
-                Assert.False(await s.Initialize());
+                Assert.False(await s.Initialize<AppDomainConcurrencyHandler>());
             }
 
             File.Delete("test2.blob");
             File.WriteAllText("test2.blob",
                 "ABCD234                                                                    ");
-            using (var s = new BlobStorage("test2.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test2.blob"))
             {
-                Assert.False(await s.Initialize());
+                Assert.False(await s.Initialize<AppDomainConcurrencyHandler>());
             }
 
             File.Delete("test2.blob");
             File.WriteAllText("test2.blob",
                 "BLOB234                                                                    ");
-            using (var s = new BlobStorage("test2.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test2.blob"))
             {
-                Assert.False(await s.Initialize());
+                Assert.False(await s.Initialize<AppDomainConcurrencyHandler>());
             }
         }
 
         [Fact]
         public async void RemoveChunk()
         {
-            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test.blob"))
             {
-                Assert.True(await s.Initialize());
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>());
 
                 var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
                 var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);
@@ -197,9 +197,9 @@
         [Fact]
         public async void SpaceReuse()
         {
-            using (var s = new BlobStorage("test.blob", new AppDomainConcurrencyHandler()))
+            using (var s = new BlobStorage("test.blob"))
             {
-                Assert.True(await s.Initialize());
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>());
 
                 var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
                 var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);
