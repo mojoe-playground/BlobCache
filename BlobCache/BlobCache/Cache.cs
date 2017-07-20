@@ -63,7 +63,7 @@
             }
 
             // Save header
-            var header = new CacheHead { Key = key, TimeToLive = timeToLive, Chunks = ids, Length = data.Length };
+            var header = new CacheHead { Key = key, Added = DateTime.UtcNow, TimeToLive = timeToLive.ToUniversalTime(), Chunks = ids, Length = data.Length };
             using (var ms = new MemoryStream())
             using (var w = new BinaryWriter(ms, Encoding.UTF8, true))
             {
@@ -300,7 +300,7 @@
 
         private async Task<CacheHead> ValidHead(string key)
         {
-            var n = DateTime.Now;
+            var n = DateTime.UtcNow;
             return (await Heads(key)).LastOrDefault(h => h.HeadChunk.Type == ChunkTypes.Head && h.Chunks.Count == h.ValidChunks.Count && h.TimeToLive > n);
         }
     }
