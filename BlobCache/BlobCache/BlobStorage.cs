@@ -30,6 +30,11 @@
         }
 
         /// <summary>
+        ///     Gets a value indicating whether the storage is initialized by this instance
+        /// </summary>
+        public bool FreshlyInitialized { get; private set; }
+
+        /// <summary>
         ///     Gets a value indicating whether the cache is initialized
         /// </summary>
         public bool IsInitialized { get; private set; }
@@ -100,7 +105,7 @@
                             {
                                 // if chunk size equals with the free space size, replace free space with chunk
                                 chunk = new StorageChunk(free.Id, userData, chunkType, position,
-                                        size)
+                                        size, DateTime.UtcNow)
                                     { Changing = true };
                                 info.ChunkList[info.ChunkList.IndexOf(free)] = chunk;
                                 free = default(StorageChunk);
@@ -110,9 +115,9 @@
                                 // chunk size < free space size, remove chunk sized portion of the free space
                                 var index = info.ChunkList.IndexOf(free);
                                 var remaining = free.Size - size - StorageChunk.ChunkHeaderSize;
-                                free = new StorageChunk(free.Id, 0, ChunkTypes.Free, position + size + StorageChunk.ChunkHeaderSize, remaining) { Changing = true };
+                                free = new StorageChunk(free.Id, 0, ChunkTypes.Free, position + size + StorageChunk.ChunkHeaderSize, remaining, DateTime.UtcNow) { Changing = true };
                                 info.ChunkList[index] = free;
-                                chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size)
+                                chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size, DateTime.UtcNow)
                                     { Changing = true };
                                 info.ChunkList.Add(chunk);
                             }
@@ -122,7 +127,7 @@
                             // no space found, add chunk at the end of the file
                             var last = info.Chunks.OrderByDescending(ch => ch.Position).FirstOrDefault();
                             var position = last.Position == 0 ? HeaderSize : last.Position + last.Size + StorageChunk.ChunkHeaderSize;
-                            chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size) { Changing = true };
+                            chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size, DateTime.UtcNow) { Changing = true };
                             info.ChunkList.Add(chunk);
                             f.SetLength(position + StorageChunk.ChunkHeaderSize + size);
                         }
@@ -412,7 +417,7 @@
 
                             // Mark the chunk changing while updating the file
                             var index = info.ChunkList.IndexOf(chunk);
-                            chunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition, freeSize) { Changing = true };
+                            chunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition, freeSize, DateTime.UtcNow) { Changing = true };
                             info.ChunkList[index] = chunk;
 
                             info.RemovedVersion++;
@@ -505,6 +510,8 @@
                     info.Initialized = true;
                     WriteInfo(info);
                 }
+
+                FreshlyInitialized = true;
             });
         }
 

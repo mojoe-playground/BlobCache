@@ -23,6 +23,7 @@
         public Cache(BlobStorage storage)
         {
             Storage = storage;
+            CleanupNeeded = Storage.IsInitialized;
         }
 
         private BlobStorage Storage { get; }
@@ -64,7 +65,7 @@
             }
 
             // Save header
-            var header = new CacheHead { Key = key, Added = DateTime.UtcNow, TimeToLive = timeToLive.ToUniversalTime(), Chunks = ids, Length = data.Length };
+            var header = new CacheHead { Key = key, TimeToLive = timeToLive.ToUniversalTime(), Chunks = ids, Length = data.Length };
             using (var ms = new MemoryStream())
             using (var w = new BinaryWriter(ms, Encoding.UTF8, true))
             {
@@ -179,7 +180,12 @@
 
         public async Task<bool> Initialize()
         {
-            return await Storage.Initialize<SessionConcurrencyHandler>();
+            var res = await Storage.Initialize<SessionConcurrencyHandler>();
+
+            if (res && (CleanupNeeded || Storage.FreshlyInitialized))
+                await Cleanup();
+
+            return res;
         }
 
         public async Task<bool> Remove(string key)
@@ -223,6 +229,19 @@
         {
             return string.Equals(key1, key2);
         }
+
+        /// <summary>
+        /// Optimizes storage, removes dead data
+        /// </summary>
+        /// <returns>Task</returns>
+        public Task Cleanup()
+        {
+            return Task.Run(() => {
+                var heads = Heads(null);
+            });
+        }
+
+        private bool CleanupNeeded { get; set; }
 
         private async Task<List<CacheHead>> Heads(string key)
         {

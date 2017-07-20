@@ -13,8 +13,9 @@
         public uint Id { get; }
         public uint UserData { get; }
         public int ReadCount { get; internal set; }
+        public DateTime Added { get; }
 
-        internal StorageChunk(uint id, uint userData, int chunkType, long position, uint size)
+        internal StorageChunk(uint id, uint userData, int chunkType, long position, uint size, DateTime added)
         {
             Id = id;
             Type = chunkType;
@@ -23,9 +24,10 @@
             UserData = userData;
             Changing = false;
             ReadCount = 0;
+            Added = added;
         }
 
-        internal const int ChunkHeaderSize = 16;
+        internal const int ChunkHeaderSize = 24;
 
         internal static StorageChunk FromStorage(BinaryReader reader)
         {
@@ -38,12 +40,13 @@
             var i = reader.ReadUInt32();
             var d = reader.ReadUInt32();
             var s = reader.ReadUInt32();
+            var a = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
 
             if (p + s > reader.BaseStream.Length)
                 throw new InvalidDataException("Chunk size points outside of stream");
 
             reader.BaseStream.Seek(s, SeekOrigin.Current);
-            return new StorageChunk(i, d, t, p, s);
+            return new StorageChunk(i, d, t, p, s, a);
         }
 
         internal static StorageChunk FromStream(BinaryReader reader)
@@ -53,8 +56,9 @@
             var i = reader.ReadUInt32();
             var d = reader.ReadUInt32();
             var s = reader.ReadUInt32();
+            var a = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
 
-            return new StorageChunk(i, d, t, p, s);
+            return new StorageChunk(i, d, t, p, s, a);
         }
 
         internal void ToStorage(BinaryWriter writer, bool forceFree = false)
@@ -63,6 +67,7 @@
             writer.Write(Id);
             writer.Write(UserData);
             writer.Write(Size);
+            writer.Write(Added.Ticks);
         }
 
         internal void ToStream(BinaryWriter writer)
@@ -72,6 +77,7 @@
             writer.Write(Id);
             writer.Write(UserData);
             writer.Write(Size);
+            writer.Write(Added.Ticks);
         }
 
         public bool Equals(StorageChunk other)
