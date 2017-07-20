@@ -49,8 +49,7 @@
                     freeSize = remaining > 1024 ? (await Storage.GetFreeChunkSizes()).FirstOrDefault(s => s > remaining / 20) : 0u;
 
                 var len = remaining;
-                if (freeSize > 0)
-                    len = Math.Min(len, freeSize);
+                len = Math.Min(len, freeSize > 0 ? freeSize : 5 * 1024 * 1024);
 
                 var buffer = new byte[len];
 
