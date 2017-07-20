@@ -4,6 +4,7 @@
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
+    using System.Security;
     using System.Text;
     using System.Threading.Tasks;
     using CityHash;
@@ -138,7 +139,7 @@
                 // Cut excess space at the storage end
                 await Storage.CutBackPadding();
 
-                if (MaximumSize == 0)
+                if (MaximumSize <= 0)
                     return;
 
                 // Check storage size is over maximum
@@ -259,6 +260,16 @@
 
         public async Task<bool> Initialize()
         {
+            // If storage size exceeds two times the maximum size try to delete the cache and start over
+            if (MaximumSize > 0 && Storage.Info.Exists && Storage.Info.Length > MaximumSize * 2)
+                try
+                {
+                    Storage.Info.Delete();
+                }
+                catch (IOException) { }
+                catch (SecurityException) { }
+                catch (UnauthorizedAccessException) { }
+
             var res = await Storage.Initialize<SessionConcurrencyHandler>();
 
             if (res && (CleanupNeeded || Storage.FreshlyInitialized))
