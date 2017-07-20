@@ -5,6 +5,7 @@
     using System.IO;
     using System.Linq;
     using System.Text;
+    using System.Threading;
     using System.Threading.Tasks;
     using ConcurrencyModes;
 
@@ -55,11 +56,11 @@
         /// <param name="userData">Chunk user data</param>
         /// <param name="data">bytes to add</param>
         /// <returns>StorageChunk of the added chunk</returns>
-        public async Task<StorageChunk> AddChunk(int chunkType, uint userData, byte[] data)
+        public async Task<StorageChunk> AddChunk(int chunkType, uint userData, byte[] data, CancellationToken token)
         {
             using (var ms = new MemoryStream(data))
             {
-                return await AddChunk(chunkType, userData, ms);
+                return await AddChunk(chunkType, userData, ms, token);
             }
         }
 
@@ -70,7 +71,7 @@
         /// <param name="userData">Chunk user data</param>
         /// <param name="data">Stream to add</param>
         /// <returns>StorageChunk of the added chunk</returns>
-        public Task<StorageChunk> AddChunk(int chunkType, uint userData, Stream data)
+        public Task<StorageChunk> AddChunk(int chunkType, uint userData, Stream data, CancellationToken token)
         {
             return Task.Run(async () =>
             {
@@ -87,7 +88,7 @@
                 using (var f = Open())
                 using (var w = new BinaryWriter(f, Encoding.UTF8))
                 {
-                    using (WriteLock(ConcurrencyHandler.Timeout))
+                    using (WriteLock(ConcurrencyHandler.Timeout, token))
                     {
                         var info = ReadInfo();
 
@@ -135,58 +136,71 @@
                         WriteInfo(info);
                     }
 
-                    // write chunk data to blob
-                    f.Position = chunk.Position;
-                    chunk.ToStorage(w, true);
-                    await data.CopyToAsync(f);
+                    var ok = false;
 
-                    if (free.Changing)
+                    try
                     {
-                        f.Position = free.Position;
-                        free.ToStorage(w);
+                        // write chunk data to blob
+                        f.Position = chunk.Position;
+                        chunk.ToStorage(w, true);
+                        await data.CopyToAsync(f, 81920, token);
+
+                        if (free.Changing)
+                        {
+                            f.Position = free.Position;
+                            free.ToStorage(w);
+                        }
+
+                        await f.FlushAsync(CancellationToken.None);
+
+                        f.Position = chunk.Position;
+                        w.Write(chunk.Type);
+                        await f.FlushAsync(CancellationToken.None);
+
+                        ok = true;
                     }
-
-                    await f.FlushAsync();
-
-                    f.Position = chunk.Position;
-                    w.Write(chunk.Type);
-                    await f.FlushAsync();
-                }
-
-                using (WriteLock(ConcurrencyHandler.Timeout))
-                {
-                    var info = ReadInfo();
-
-                    var index = info.ChunkList.IndexOf(chunk);
-                    chunk.Changing = false;
-                    info.ChunkList[index] = chunk;
-
-                    if (free.Changing)
+                    finally
                     {
-                        index = info.ChunkList.IndexOf(free);
-                        free.Changing = false;
-                        info.ChunkList[index] = free;
+                        using (WriteLock(ConcurrencyHandler.Timeout, CancellationToken.None))
+                        {
+                            var info = ReadInfo();
+
+                            var index = info.ChunkList.IndexOf(chunk);
+
+                            // Exception occured, chunk should stay free
+                            if (!ok)
+                                chunk = info.ChunkList[index];
+
+                            chunk.Changing = false;
+                            info.ChunkList[index] = chunk;
+
+                            if (free.Changing)
+                            {
+                                index = info.ChunkList.IndexOf(free);
+                                free.Changing = false;
+                                info.ChunkList[index] = free;
+                            }
+
+                            info.AddedVersion++;
+                            WriteInfo(info);
+                        }
                     }
-
-                    info.AddedVersion++;
-                    WriteInfo(info);
                 }
-
                 return chunk;
-            });
+            }, token);
         }
 
         /// <summary>
         ///     Cuts the excess free space from the end of the storage
         /// </summary>
         /// <returns>Task</returns>
-        public Task CutBackPadding()
+        public Task CutBackPadding(CancellationToken token)
         {
             return Task.Run(() =>
             {
                 using (var f = Open())
                 {
-                    using (WriteLock(ConcurrencyHandler.Timeout))
+                    using (WriteLock(ConcurrencyHandler.Timeout, token))
                     {
                         var info = ReadInfo();
 
@@ -227,9 +241,9 @@
         ///     Gets the free chunk sizes
         /// </summary>
         /// <returns>Free chunk sizes in the blob</returns>
-        public async Task<IReadOnlyList<uint>> GetFreeChunkSizes()
+        public async Task<IReadOnlyList<uint>> GetFreeChunkSizes(CancellationToken token)
         {
-            var chunks = await GetChunks();
+            var chunks = await GetChunks(token);
             return chunks.Where(c => c.Type == ChunkTypes.Free).Select(c => c.Size).ToList();
         }
 
@@ -237,7 +251,7 @@
         ///     Initialize the storage
         /// </summary>
         /// <returns>True if initialization successful, otherwise false</returns>
-        public async Task<bool> Initialize<T>()
+        public async Task<bool> Initialize<T>(CancellationToken token)
             where T : ConcurrencyHandler, new()
         {
             try
@@ -253,7 +267,7 @@
 
                 CheckBlobStorageHeader();
 
-                await CheckInitialization();
+                await CheckInitialization(token);
                 IsInitialized = true;
             }
             catch (NotSupportedException)
@@ -261,6 +275,10 @@
                 return false;
             }
             catch (TimeoutException)
+            {
+                return false;
+            }
+            catch (OperationCanceledException)
             {
                 return false;
             }
@@ -284,9 +302,9 @@
         ///     Chunks written to streams in the order of the selector's result, if multiple chunks are using the same stream
         ///     the data is written in the selector's result order
         /// </remarks>
-        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator)
+        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator, CancellationToken token)
         {
-            return (await ReadChunksInternal(selector, streamCreator)).Select(r => (r.Chunk, r.Stream)).ToList();
+            return (await ReadChunksInternal(selector, streamCreator, token)).Select(r => (r.Chunk, r.Stream)).ToList();
         }
 
         /// <summary>
@@ -301,7 +319,7 @@
         ///     Chunks written to streams in the order of the selector's result, if multiple chunks are using the same stream
         ///     the data is written in the selector's result order
         /// </remarks>
-        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<(StorageChunk, Stream)>> selector)
+        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<(StorageChunk, Stream)>> selector, CancellationToken token)
         {
             var streamList = new Dictionary<StorageChunk, Stream>();
             return (await ReadChunksInternal(sc =>
@@ -310,7 +328,7 @@
                 foreach (var c in list)
                     streamList[c.Item1] = c.Item2;
                 return list.Select(p => p.Item1);
-            }, c => streamList[c])).Select(r => (r.Chunk, r.Stream)).ToList();
+            }, c => streamList[c], token)).Select(r => (r.Chunk, r.Stream)).ToList();
         }
 
         /// <summary>
@@ -323,9 +341,9 @@
         ///     Stream creator to create the output streams for the data, input: chunk read, output: stream to use
         /// </param>
         /// <returns>List of chunk, Stream pairs</returns>
-        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageChunk, bool> condition, Func<StorageChunk, Stream> streamCreator)
+        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageChunk, bool> condition, Func<StorageChunk, Stream> streamCreator, CancellationToken token)
         {
-            return (await ReadChunksInternal(sc => sc.Chunks.Where(condition), streamCreator)).Select(r => (r.Chunk, r.Stream)).ToList();
+            return (await ReadChunksInternal(sc => sc.Chunks.Where(condition), streamCreator, token)).Select(r => (r.Chunk, r.Stream)).ToList();
         }
 
         /// <summary>
@@ -336,7 +354,7 @@
         ///     stream indicates not to read)
         /// </param>
         /// <returns>List of chunk, Stream pairs</returns>
-        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageChunk, Stream> selector)
+        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageChunk, Stream> selector, CancellationToken token)
         {
             var streamList = new Dictionary<StorageChunk, Stream>();
             return (await ReadChunksInternal(sc =>
@@ -352,7 +370,7 @@
                     }
                 }
                 return list;
-            }, c => streamList[c])).Select(r => (r.Chunk, r.Stream)).ToList();
+            }, c => streamList[c], token)).Select(r => (r.Chunk, r.Stream)).ToList();
         }
 
         /// <summary>
@@ -363,9 +381,9 @@
         ///     chunks to read
         /// </param>
         /// <returns>List of chunk, byte[] pairs in the order of the selector's result</returns>
-        public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector)
+        public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, CancellationToken token)
         {
-            return (await ReadChunksInternal(selector, null)).Select(r => (r.Chunk, r.Data)).ToList();
+            return (await ReadChunksInternal(selector, null, token)).Select(r => (r.Chunk, r.Data)).ToList();
         }
 
         /// <summary>
@@ -375,9 +393,9 @@
         ///     Condition to choose which chunks to read
         /// </param>
         /// <returns>List of chunk, byte[] pairs</returns>
-        public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageChunk, bool> condition)
+        public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageChunk, bool> condition, CancellationToken token)
         {
-            return (await ReadChunksInternal(sc => sc.Chunks.Where(condition), null)).Select(r => (r.Chunk, r.Data)).ToList();
+            return (await ReadChunksInternal(sc => sc.Chunks.Where(condition), null, token)).Select(r => (r.Chunk, r.Data)).ToList();
         }
 
         /// <summary>
@@ -388,7 +406,7 @@
         ///     chunk to remove (null to cancel)
         /// </param>
         /// <returns>Task</returns>
-        public Task RemoveChunk(Func<StorageInfo, StorageChunk?> selector)
+        public Task RemoveChunk(Func<StorageInfo, StorageChunk?> selector, CancellationToken token)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
@@ -403,12 +421,12 @@
 
                     // If there are readers for the selected chunk wait here while a read is finished and try again
                     if (wait)
-                        ConcurrencyHandler.WaitForReadFinish();
+                        ConcurrencyHandler.WaitForReadFinish(token);
 
                     using (var f = Open())
                     using (var w = new BinaryWriter(f, Encoding.UTF8))
                     {
-                        using (WriteLock(ConcurrencyHandler.Timeout))
+                        using (WriteLock(ConcurrencyHandler.Timeout, token))
                         {
                             var info = ReadInfo();
 
@@ -463,10 +481,10 @@
                         // Mark the chunk free
                         f.Position = chunk.Position;
                         chunk.ToStorage(w);
-                        await f.FlushAsync();
+                        await f.FlushAsync(CancellationToken.None);
                     }
 
-                    using (WriteLock(ConcurrencyHandler.Timeout))
+                    using (WriteLock(ConcurrencyHandler.Timeout, CancellationToken.None))
                     {
                         var info = ReadInfo();
 
@@ -482,11 +500,11 @@
             });
         }
 
-        public Task<StorageStatistics> Statistics()
+        public Task<StorageStatistics> Statistics(CancellationToken token)
         {
             return Task.Run(async () =>
             {
-                var chunks = await GetChunks();
+                var chunks = await GetChunks(token);
                 Info.Refresh();
 
                 var used = chunks.Where(c => c.Type != ChunkTypes.Free).ToList();
@@ -504,11 +522,11 @@
             });
         }
 
-        internal Task<IReadOnlyList<StorageChunk>> GetChunks()
+        internal Task<IReadOnlyList<StorageChunk>> GetChunks(CancellationToken token)
         {
             return Task.Run(() =>
             {
-                using (ReadLock(ConcurrencyHandler.Timeout))
+                using (ReadLock(ConcurrencyHandler.Timeout, token))
                 {
                     return ReadInfo().Chunks;
                 }
@@ -536,11 +554,11 @@
             }
         }
 
-        private Task CheckInitialization()
+        private Task CheckInitialization(CancellationToken token)
         {
             return Task.Run(() =>
             {
-                using (WriteLock(ConcurrencyHandler.Timeout))
+                using (WriteLock(ConcurrencyHandler.Timeout, token))
                 {
                     var info = ReadInfo();
 
@@ -556,6 +574,7 @@
                         while (f.Position != f.Length)
                             try
                             {
+                                token.ThrowIfCancellationRequested();
                                 position = f.Position;
                                 info.ChunkList.Add(StorageChunk.FromStorage(br));
                             }
@@ -601,7 +620,7 @@
             return new FileStream(Info.FullName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         }
 
-        private async Task<(StorageChunk, byte[], Stream)> ReadChunk(StorageChunk chunk, Stream target)
+        private async Task<(StorageChunk, byte[], Stream)> ReadChunk(StorageChunk chunk, Stream target, CancellationToken token)
         {
             using (var f = Open())
             {
@@ -613,18 +632,18 @@
 
                 while (position < chunk.Size && read != 0)
                 {
-                    read = await f.ReadAsync(res, 0, (int)Math.Min(res.Length, chunk.Size - position));
+                    read = await f.ReadAsync(res, 0, (int)Math.Min(res.Length, chunk.Size - position), token);
                     position += read;
 
                     if (target != null)
-                        await target.WriteAsync(res, 0, read);
+                        await target.WriteAsync(res, 0, read, token);
                 }
 
                 return (chunk, res, target);
             }
         }
 
-        private Task<List<(StorageChunk Chunk, byte[] Data, Stream Stream)>> ReadChunksInternal(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator)
+        private Task<List<(StorageChunk Chunk, byte[] Data, Stream Stream)>> ReadChunksInternal(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator, CancellationToken token)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
@@ -634,7 +653,7 @@
                 List<StorageChunk> chunksToRead;
                 var res = new List<(StorageChunk, byte[], Stream)>();
 
-                using (WriteLock(ConcurrencyHandler.Timeout))
+                using (WriteLock(ConcurrencyHandler.Timeout, token))
                 {
                     var info = ReadInfo();
 
@@ -658,17 +677,19 @@
                 {
                     foreach (var r in chunksToRead)
                     {
+                        token.ThrowIfCancellationRequested();
+
                         Stream stream = null;
 
                         if (streamCreator != null)
                             stream = streamCreator.Invoke(r);
 
-                        res.Add(await ReadChunk(r, stream));
+                        res.Add(await ReadChunk(r, stream, token));
                     }
                 }
                 finally
                 {
-                    using (WriteLock(ConcurrencyHandler.Timeout))
+                    using (WriteLock(ConcurrencyHandler.Timeout, CancellationToken.None))
                     {
                         var info = ReadInfo();
 
@@ -689,7 +710,7 @@
                     ConcurrencyHandler.SignalReadFinish();
 
                 return res;
-            });
+            }, token);
         }
 
         private StorageInfo ReadInfo()
@@ -697,9 +718,9 @@
             return ConcurrencyHandler.ReadInfo();
         }
 
-        private IDisposable ReadLock(int timeout)
+        private IDisposable ReadLock(int timeout, CancellationToken token)
         {
-            return ConcurrencyHandler.ReadLock(timeout);
+            return ConcurrencyHandler.ReadLock(timeout, token);
         }
 
         private void WriteInfo(StorageInfo info)
@@ -707,9 +728,9 @@
             ConcurrencyHandler.WriteInfo(info);
         }
 
-        private IDisposable WriteLock(int timeout)
+        private IDisposable WriteLock(int timeout, CancellationToken token)
         {
-            return ConcurrencyHandler.WriteLock(timeout);
+            return ConcurrencyHandler.WriteLock(timeout, token);
         }
     }
 }

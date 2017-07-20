@@ -64,7 +64,7 @@
             }
         }
 
-        public override IDisposable ReadLock(int timeout)
+        public override IDisposable ReadLock(int timeout, CancellationToken token)
         {
             return ReaderWriterLock.ReadLock(timeout);
         }
@@ -79,9 +79,14 @@
             ReaderWriterLock.ReadEvent.Reset();
         }
 
-        public override void WaitForReadFinish()
+        public override void WaitForReadFinish(CancellationToken token)
         {
-            ReaderWriterLock.ReadEvent.WaitOne();
+            while (true)
+            {
+                if (ReaderWriterLock.ReadEvent.WaitOne(500))
+                    break;
+                token.ThrowIfCancellationRequested();
+            }
         }
 
         public override void WriteInfo(StorageInfo info)
@@ -92,9 +97,9 @@
             }
         }
 
-        public override IDisposable WriteLock(int timeout)
+        public override IDisposable WriteLock(int timeout, CancellationToken token)
         {
-            return ReaderWriterLock.WriteLock(timeout);
+            return ReaderWriterLock.WriteLock(timeout, token);
         }
 
         protected virtual MemoryMappedFile CreateMemoryMappedFile()
@@ -182,7 +187,7 @@
                 }
             }
 
-            public IDisposable WriteLock(int timeout)
+            public IDisposable WriteLock(int timeout, CancellationToken token)
             {
                 var sw = new Stopwatch();
                 sw.Start();
@@ -215,6 +220,7 @@
                     var count = _semaphore.Release();
                     while (count != SemaphoreCount - 1)
                     {
+                        token.ThrowIfCancellationRequested();
                         // sleep briefly so other processes get a chance.
                         // You might want to tweak this value.  Sleep(1) might be okay.
                         Thread.Sleep(10);

@@ -11,7 +11,7 @@
             return LocalSyncData.ReadInfo(Id);
         }
 
-        public override IDisposable ReadLock(int timeout)
+        public override IDisposable ReadLock(int timeout, CancellationToken token)
         {
             var l = LocalSyncData.ReadWriteLock(Id);
 
@@ -33,9 +33,9 @@
             LocalSyncData.Signal(Id).Reset();
         }
 
-        public override void WaitForReadFinish()
+        public override void WaitForReadFinish(CancellationToken token)
         {
-            LocalSyncData.Signal(Id).Wait();
+            LocalSyncData.Signal(Id).Wait(token);
         }
 
         public override void WriteInfo(StorageInfo info)
@@ -43,7 +43,7 @@
             LocalSyncData.WriteInfo(Id, info);
         }
 
-        public override IDisposable WriteLock(int timeout)
+        public override IDisposable WriteLock(int timeout, CancellationToken token)
         {
             var l = LocalSyncData.ReadWriteLock(Id);
 

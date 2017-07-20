@@ -1,6 +1,7 @@
 ﻿namespace BlobCache.ConcurrencyModes
 {
     using System;
+    using System.Threading;
     using JetBrains.Annotations;
 
     public abstract class ConcurrencyHandler : IDisposable
@@ -18,7 +19,7 @@
 
         public abstract StorageInfo ReadInfo();
 
-        public abstract IDisposable ReadLock(int timeout);
+        public abstract IDisposable ReadLock(int timeout, CancellationToken token);
 
         // Should set manual signal
         public abstract void SignalReadFinish();
@@ -27,11 +28,11 @@
         public abstract void SignalWaitRequired();
 
         // Should wait for manual signal
-        public abstract void WaitForReadFinish();
+        public abstract void WaitForReadFinish(CancellationToken token);
 
         public abstract void WriteInfo(StorageInfo info);
 
-        public abstract IDisposable WriteLock(int timeout);
+        public abstract IDisposable WriteLock(int timeout, CancellationToken token);
 
         protected virtual void Dispose(bool disposing)
         {

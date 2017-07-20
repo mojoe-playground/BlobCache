@@ -6,6 +6,7 @@
     using System.Linq;
     using System.Security;
     using System.Text;
+    using System.Threading;
     using System.Threading.Tasks;
     using CityHash;
     using ConcurrencyModes;
@@ -13,6 +14,13 @@
     public class Cache : IDisposable
     {
         private readonly Dictionary<string, (uint Hash, List<CacheHead> Heads)> _headCache = new Dictionary<string, (uint, List<CacheHead>)>();
+
+        /// <summary>
+        ///     Gets the reference time used for cleanup
+        /// </summary>
+        /// <remarks>Used in tests to simulate old data in storages</remarks>
+        internal Func<DateTime> CleanupTime = () => DateTime.UtcNow;
+
         private ulong _headCacheAddedVersion;
         private ulong _headCacheRemovedVersion;
 
@@ -27,18 +35,22 @@
             CleanupNeeded = Storage.IsInitialized;
         }
 
+        public double CutBackRatio { get; set; } = 0.8;
+
+        public long MaximumSize { get; set; }
+
         private bool CleanupNeeded { get; }
 
         private BlobStorage Storage { get; }
 
-        public async Task Add(string key, DateTime timeToLive, byte[] data)
+        public async Task Add(string key, DateTime timeToLive, byte[] data, CancellationToken token)
         {
             if (data == null)
                 throw new ArgumentNullException(nameof(data));
             var hash = GetHash(key);
 
             // Get old records, will be removed at the end
-            var heads = await Heads(key);
+            var heads = await Heads(key, token);
 
             var position = 0u;
             var remaining = (uint)data.Length;
@@ -54,7 +66,7 @@
                 // If block is bigger than 1k get the free spaces from storage and try to fill them up. To minimize fragmentation use free chunks greater than 1 / 20 of the block size.
                 // If block is smaller than 1k do not look for free space because storage will look for a free chunk with enough space
                 if (freeSize > 0)
-                    freeSize = blockRemaining > 1024 ? (await Storage.GetFreeChunkSizes()).FirstOrDefault(s => s > blockRemaining / 20) : 0u;
+                    freeSize = blockRemaining > 1024 ? (await Storage.GetFreeChunkSizes(token)).FirstOrDefault(s => s > blockRemaining / 20) : 0u;
 
                 var len = blockRemaining;
                 if (freeSize > 0)
@@ -64,7 +76,7 @@
 
                 Array.Copy(data, position, buffer, 0, len);
 
-                var chunk = await Storage.AddChunk(ChunkTypes.Data, hash, buffer);
+                var chunk = await Storage.AddChunk(ChunkTypes.Data, hash, buffer, token);
 
                 position += len;
                 remaining -= len;
@@ -78,7 +90,7 @@
             {
                 header.ToStream(w);
 
-                await Storage.AddChunk(ChunkTypes.Head, hash, ms.ToArray());
+                await Storage.AddChunk(ChunkTypes.Head, hash, ms.ToArray(), token);
             }
 
             // Remove old heads
@@ -90,7 +102,7 @@
                     if (l.Count == 0)
                         return null;
                     return l.First();
-                });
+                }, token);
                 foreach (var ch in h.ValidChunks)
                     await Storage.RemoveChunk(sc =>
                     {
@@ -98,52 +110,46 @@
                         if (l.Count == 0)
                             return null;
                         return l.First();
-                    });
+                    }, token);
             }
         }
-
-        /// <summary>
-        /// Gets the reference time used for cleanup
-        /// </summary>
-        /// <remarks>Used in tests to simulate old data in storages</remarks>
-        internal Func<DateTime> CleanupTime = () => DateTime.UtcNow;
 
         /// <summary>
         ///     Optimizes storage, removes dead data
         /// </summary>
         /// <returns>Task</returns>
-        public Task Cleanup()
+        public Task Cleanup(CancellationToken token)
         {
             return Task.Run(async () =>
             {
-                var heads = await Heads(null);
+                var heads = await Heads(null, token);
 
                 var now = CleanupTime();
 
                 // Find invalid headers and remove the record
                 var badHeaders = heads.Where(h => h.TimeToLive < now || h.ValidChunks.Count != h.Chunks.Count).ToList();
                 foreach (var r in badHeaders)
-                    await Remove(r.Key);
+                    await Remove(r.Key, token);
 
                 // Find good headers and their data chunk ids
                 var goodHeaders = heads.Where(h => h.TimeToLive >= now && h.ValidChunks.Count == h.Chunks.Count).ToList();
                 var goodData = goodHeaders.SelectMany(d => d.ValidChunks.Select(c => c.Id)).Distinct().ToDictionary(id => id);
 
                 var oldDataCutoff = now.AddDays(-1);
-                var chunks = await Storage.GetChunks();
+                var chunks = await Storage.GetChunks(token);
 
                 // Remove data chunks not belonging to good headers and added more than a day ago
                 foreach (var c in chunks.Where(ch => ch.Type == ChunkTypes.Data && ch.Added < oldDataCutoff && !goodData.ContainsKey(ch.Id) && !ch.Changing).ToList())
-                    await Storage.RemoveChunk(sc => sc.Chunks.FirstOrDefault(ch => ch.Id == c.Id && ch.Type == c.Type && ch.Position == c.Position && ch.Size == c.Size && ch.UserData == c.UserData));
+                    await Storage.RemoveChunk(sc => sc.Chunks.FirstOrDefault(ch => ch.Id == c.Id && ch.Type == c.Type && ch.Position == c.Position && ch.Size == c.Size && ch.UserData == c.UserData), token);
 
                 // Cut excess space at the storage end
-                await Storage.CutBackPadding();
+                await Storage.CutBackPadding(token);
 
                 if (MaximumSize <= 0)
                     return;
 
                 // Check storage size is over maximum
-                var statistics = await Storage.Statistics();
+                var statistics = await Storage.Statistics(token);
 
                 if (statistics.FileSize < MaximumSize)
                     return;
@@ -152,7 +158,7 @@
                 var targetSize = MaximumSize * CutBackRatio;
 
                 // Order heads by remaining time of the record then oldest first.
-                heads = (await Heads(null)).OrderBy(h=>h.TimeToLive).ThenBy(h=>h.HeadChunk.Added).ToList();
+                heads = (await Heads(null, token)).OrderBy(h => h.TimeToLive).ThenBy(h => h.HeadChunk.Added).ToList();
 
                 // Get the size to shred from storage
                 var spaceNeeded = statistics.FileSize - targetSize;
@@ -161,34 +167,31 @@
                     if (spaceNeeded < 0)
                         break;
 
-                    await Remove(h.Key);
+                    await Remove(h.Key, token);
 
                     // Shred weight of the record (overhead not calculated, a litle extra shredded weight is not a problem)
                     spaceNeeded -= h.Length;
                 }
 
                 // Cut excess space at the storage end again
-                await Storage.CutBackPadding();
+                await Storage.CutBackPadding(token);
             });
         }
-
-        public long MaximumSize { get; set; }
-        public double CutBackRatio { get; set; } = 0.8;
 
         public void Dispose()
         {
             Storage?.Dispose();
         }
 
-        public async Task<bool> Exists(string key)
+        public async Task<bool> Exists(string key, CancellationToken token)
         {
-            return !string.IsNullOrEmpty((await ValidHead(key)).Key);
+            return !string.IsNullOrEmpty((await ValidHead(key, token)).Key);
         }
 
-        public async Task<bool> Get(string key, Stream target)
+        public async Task<bool> Get(string key, Stream target, CancellationToken token)
         {
             var hash = GetHash(key);
-            var head = await ValidHead(key);
+            var head = await ValidHead(key, token);
 
             if (string.IsNullOrEmpty(head.Key))
                 return false;
@@ -209,7 +212,7 @@
                 }
 
                 return list;
-            });
+            }, token);
 
             if (chunks.Count == 0)
                 return false;
@@ -217,10 +220,10 @@
             return true;
         }
 
-        public async Task<byte[]> Get(string key)
+        public async Task<byte[]> Get(string key, CancellationToken token)
         {
             var hash = GetHash(key);
-            var head = await ValidHead(key);
+            var head = await ValidHead(key, token);
 
             if (string.IsNullOrEmpty(head.Key))
                 return null;
@@ -244,7 +247,7 @@
                 }
 
                 return list;
-            });
+            }, token);
 
             if (chunks.Count == 0)
                 return null;
@@ -258,7 +261,7 @@
             return result;
         }
 
-        public async Task<bool> Initialize()
+        public async Task<bool> Initialize(CancellationToken token)
         {
             // If storage size exceeds two times the maximum size try to delete the cache and start over
             if (MaximumSize > 0 && Storage.Info.Exists && Storage.Info.Length > MaximumSize * 2)
@@ -266,22 +269,28 @@
                 {
                     Storage.Info.Delete();
                 }
-                catch (IOException) { }
-                catch (SecurityException) { }
-                catch (UnauthorizedAccessException) { }
+                catch (IOException)
+                {
+                }
+                catch (SecurityException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
 
-            var res = await Storage.Initialize<SessionConcurrencyHandler>();
+            var res = await Storage.Initialize<SessionConcurrencyHandler>(token);
 
             if (res && (CleanupNeeded || Storage.FreshlyInitialized))
-                await Cleanup();
+                await Cleanup(token);
 
             return res;
         }
 
-        public async Task<bool> Remove(string key)
+        public async Task<bool> Remove(string key, CancellationToken token)
         {
             var hash = GetHash(key);
-            var heads = await Heads(key);
+            var heads = await Heads(key, token);
 
             if (heads.Count == 0)
                 return false;
@@ -294,7 +303,7 @@
                     if (l.Count == 0)
                         return null;
                     return l.First();
-                });
+                }, token);
                 foreach (var ch in h.ValidChunks)
                     await Storage.RemoveChunk(sc =>
                     {
@@ -302,7 +311,7 @@
                         if (l.Count == 0)
                             return null;
                         return l.First();
-                    });
+                    }, token);
             }
 
             return true;
@@ -320,7 +329,7 @@
             return string.Equals(key1, key2);
         }
 
-        private async Task<List<CacheHead>> Heads(string key)
+        private async Task<List<CacheHead>> Heads(string key, CancellationToken token)
         {
             if (key == null)
                 key = string.Empty;
@@ -372,7 +381,7 @@
                 if (!string.IsNullOrEmpty(key))
                     heads = heads.Where(c => c.UserData == hash);
                 return heads.ToList();
-            });
+            }, token);
 
             // If data is in the cache return it from there
             if (readFromCache)
@@ -385,6 +394,8 @@
                     // Filter all heads list for the given key
                     return _headCache[string.Empty].Heads.Where(h => KeyEquals(key, h.Key)).ToList();
                 }
+
+            token.ThrowIfCancellationRequested();
 
             // Process loaded head records
             foreach (var h in headData)
@@ -409,10 +420,10 @@
             return res;
         }
 
-        private async Task<CacheHead> ValidHead(string key)
+        private async Task<CacheHead> ValidHead(string key, CancellationToken token)
         {
             var n = DateTime.UtcNow;
-            return (await Heads(key)).LastOrDefault(h => h.HeadChunk.Type == ChunkTypes.Head && h.Chunks.Count == h.ValidChunks.Count && h.TimeToLive > n);
+            return (await Heads(key, token)).LastOrDefault(h => h.HeadChunk.Type == ChunkTypes.Head && h.Chunks.Count == h.ValidChunks.Count && h.TimeToLive > n);
         }
     }
 }
