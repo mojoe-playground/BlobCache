@@ -1,7 +1,9 @@
 ﻿namespace BlobCache
 {
+    using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.Linq;
     using System.Text;
 
     /// <summary>
@@ -87,6 +89,16 @@
                 foreach (var c in Chunks)
                     c.ToStream(w);
             }
+        }
+
+        /// <summary>
+        ///     Creates a copy of the storage info and filters chunks
+        /// </summary>
+        /// <param name="filter">Filter to apply to the chunks</param>
+        /// <returns>Copied storage info</returns>
+        internal StorageInfo FilterChunks(Func<StorageChunk, bool> filter)
+        {
+            return new StorageInfo { Initialized = Initialized, AddedVersion = AddedVersion, RemovedVersion = RemovedVersion, ChunkList = ChunkList.Where(filter).ToList() };
         }
     }
 }

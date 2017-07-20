@@ -76,17 +76,17 @@
             // Remove old heads
             foreach (var h in heads)
             {
-                await Storage.RemoveChunk((sc, v) =>
+                await Storage.RemoveChunk(sc =>
                 {
-                    var l = sc.Where(c => c.Id == h.HeadChunk.Id && c.Type == ChunkTypes.Head && c.UserData == hash).ToList();
+                    var l = sc.Chunks.Where(c => c.Id == h.HeadChunk.Id && c.Type == ChunkTypes.Head && c.UserData == hash).ToList();
                     if (l.Count == 0)
                         return null;
                     return l.First();
                 });
                 foreach (var ch in h.ValidChunks)
-                    await Storage.RemoveChunk((sc, v) =>
+                    await Storage.RemoveChunk(sc =>
                     {
-                        var l = sc.Where(c => c.Id == ch.Id && c.Type == ChunkTypes.Data && c.UserData == hash).ToList();
+                        var l = sc.Chunks.Where(c => c.Id == ch.Id && c.Type == ChunkTypes.Data && c.UserData == hash).ToList();
                         if (l.Count == 0)
                             return null;
                         return l.First();
@@ -115,9 +115,9 @@
             var result = new byte[head.Length];
             var position = 0;
 
-            var chunks = await Storage.ReadChunks((sc, v) =>
+            var chunks = await Storage.ReadChunks(sc =>
             {
-                var list = sc.Where(c => head.Chunks.Contains(c.Id)).ToList();
+                var list = sc.Chunks.Where(c => head.Chunks.Contains(c.Id)).ToList();
 
                 if (list.Any(c => c.UserData != hash || c.Type != ChunkTypes.Data))
                     return null;
@@ -150,17 +150,17 @@
 
             foreach (var h in heads)
             {
-                await Storage.RemoveChunk((sc, v) =>
+                await Storage.RemoveChunk(sc =>
                 {
-                    var l = sc.Where(c => c.Id == h.HeadChunk.Id && c.Type == ChunkTypes.Head && c.UserData == hash).ToList();
+                    var l = sc.Chunks.Where(c => c.Id == h.HeadChunk.Id && c.Type == ChunkTypes.Head && c.UserData == hash).ToList();
                     if (l.Count == 0)
                         return null;
                     return l.First();
                 });
                 foreach (var ch in h.ValidChunks)
-                    await Storage.RemoveChunk((sc, v) =>
+                    await Storage.RemoveChunk(sc =>
                     {
-                        var l = sc.Where(c => c.Id == ch.Id && c.Type == ChunkTypes.Data && c.UserData == hash).ToList();
+                        var l = sc.Chunks.Where(c => c.Id == ch.Id && c.Type == ChunkTypes.Data && c.UserData == hash).ToList();
                         if (l.Count == 0)
                             return null;
                         return l.First();
@@ -196,14 +196,14 @@
 
             var readFromCache = false;
             // Read all head records (matching the key if given) and store all data chunk info
-            var headData = await Storage.ReadChunks((sc, v) =>
+            var headData = await Storage.ReadChunks(sc =>
             {
                 lock (_headCache)
                 {
                     // Clear cache if cache version not current
-                    if (v != _headCacheVersion)
+                    if (sc.Version != _headCacheVersion)
                     {
-                        _headCacheVersion = v;
+                        _headCacheVersion = sc.Version;
                         _headCache.Clear();
                     }
 
@@ -215,8 +215,8 @@
                     }
                 }
 
-                data = sc.Where(c => c.Type == ChunkTypes.Data).ToList();
-                var heads = sc.Where(c => c.Type == ChunkTypes.Head);
+                data = sc.Chunks.Where(c => c.Type == ChunkTypes.Data).ToList();
+                var heads = sc.Chunks.Where(c => c.Type == ChunkTypes.Head);
                 if (!string.IsNullOrEmpty(key))
                     heads = heads.Where(c => c.UserData == hash);
                 return heads.ToList();

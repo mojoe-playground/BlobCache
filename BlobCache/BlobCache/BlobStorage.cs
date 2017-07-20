@@ -191,7 +191,8 @@
         ///     Initialize the storage
         /// </summary>
         /// <returns>True if initialization successful, otherwise false</returns>
-        public async Task<bool> Initialize<T>() where T:ConcurrencyHandler, new()
+        public async Task<bool> Initialize<T>()
+            where T : ConcurrencyHandler, new()
         {
             try
             {
@@ -224,7 +225,7 @@
         ///     Reads chunks from the blob
         /// </summary>
         /// <param name="selector">
-        ///     Selector to choose which chunks to read, input: available chunks, chunk data version, output:
+        ///     Selector to choose which chunks to read, input: available storage info, output:
         ///     chunks to read
         /// </param>
         /// <param name="streamCreator">
@@ -232,7 +233,7 @@
         ///     to use, value indicating whether the stream should be closed or not
         /// </param>
         /// <returns></returns>
-        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<IReadOnlyList<StorageChunk>, ulong, IEnumerable<StorageChunk>> selector, Func<StorageChunk, (Stream, bool)> streamCreator)
+        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, (Stream, bool)> streamCreator)
         {
             return (await ReadChunksInternal(selector, streamCreator)).Select(r => (r.Chunk, r.Stream)).ToList();
         }
@@ -241,24 +242,36 @@
         ///     Reads chunks from the blob
         /// </summary>
         /// <param name="selector">
-        ///     Selector to choose which chunks to read, input: available chunks, chunk data version, output:
+        ///     Selector to choose which chunks to read, input: storage info, chunk data version, output:
         ///     chunks to read
         /// </param>
         /// <returns>List of chunk, byte[] pairs</returns>
-        public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<IReadOnlyList<StorageChunk>, ulong, IEnumerable<StorageChunk>> selector)
+        public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector)
         {
             return (await ReadChunksInternal(selector, null)).Select(r => (r.Chunk, r.Data)).ToList();
+        }
+
+        /// <summary>
+        ///     Reads chunks from the blob
+        /// </summary>
+        /// <param name="condition">
+        ///     Condition to choose which chunks to read
+        /// </param>
+        /// <returns>List of chunk, byte[] pairs</returns>
+        public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageChunk, bool> condition)
+        {
+            return (await ReadChunksInternal(sc => sc.Chunks.Where(condition), null)).Select(r => (r.Chunk, r.Data)).ToList();
         }
 
         /// <summary>
         ///     Removes a chunk from the blob
         /// </summary>
         /// <param name="selector">
-        ///     Selector to choose which chunk to remove, input: available chunks, chunk data version, output:
+        ///     Selector to choose which chunk to remove, input: storage info, output:
         ///     chunk to remove (null to cancel)
         /// </param>
         /// <returns>Task</returns>
-        public Task RemoveChunk(Func<IReadOnlyList<StorageChunk>, ulong, StorageChunk?> selector)
+        public Task RemoveChunk(Func<StorageInfo, StorageChunk?> selector)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
@@ -283,7 +296,7 @@
                             var info = ReadInfo();
 
                             // Get the chunk to delete
-                            var item = selector.Invoke(info.Chunks.Where(c => c.Type != ChunkTypes.Free && !c.Changing).ToList(), info.Version);
+                            var item = selector.Invoke(info.FilterChunks(c => c.Type != ChunkTypes.Free && !c.Changing));
                             if (item == null || item.Value == default(StorageChunk))
                                 return;
 
@@ -470,7 +483,7 @@
             }
         }
 
-        private Task<List<(StorageChunk Chunk, byte[] Data, Stream Stream)>> ReadChunksInternal(Func<IReadOnlyList<StorageChunk>, ulong, IEnumerable<StorageChunk>> selector, Func<StorageChunk, (Stream, bool)> streamCreator)
+        private Task<List<(StorageChunk Chunk, byte[] Data, Stream Stream)>> ReadChunksInternal(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, (Stream, bool)> streamCreator)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
@@ -483,9 +496,8 @@
                 using (WriteLock(ConcurrencyHandler.Timeout))
                 {
                     var info = ReadInfo();
-                    var chunks = info.Chunks.Where(c => !c.Changing && c.Type != ChunkTypes.Free).ToList();
 
-                    chunksToRead = selector.Invoke(chunks, info.Version)?.ToList();
+                    chunksToRead = selector.Invoke(info.FilterChunks(c => !c.Changing && c.Type != ChunkTypes.Free))?.ToList();
                     if (chunksToRead == null)
                         return res;
 
