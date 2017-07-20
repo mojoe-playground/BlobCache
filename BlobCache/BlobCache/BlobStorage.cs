@@ -482,6 +482,28 @@
             });
         }
 
+        public Task<StorageStatistics> Statistics()
+        {
+            return Task.Run(async () =>
+            {
+                var chunks = await GetChunks();
+                Info.Refresh();
+
+                var used = chunks.Where(c => c.Type != ChunkTypes.Free).ToList();
+                var free = chunks.Where(c => c.Type == ChunkTypes.Free).ToList();
+
+                return new StorageStatistics
+                {
+                    Overhead = chunks.Count * StorageChunk.ChunkHeaderSize,
+                    UsedChunks = used.Count,
+                    UsedSpace = used.Sum(c => c.Size),
+                    FreeChunks = free.Count,
+                    FreeSpace = free.Sum(c => c.Size),
+                    FileSize = Info.Length
+                };
+            });
+        }
+
         internal Task<IReadOnlyList<StorageChunk>> GetChunks()
         {
             return Task.Run(() =>

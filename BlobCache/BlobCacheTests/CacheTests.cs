@@ -70,6 +70,39 @@
         }
 
         [Fact]
+        public async void MaximumSizeCleanup()
+        {
+            File.Delete("cache.blob");
+            var storage = new BlobStorage("cache.blob");
+            await storage.Initialize<AppDomainConcurrencyHandler>();
+            using (var c = new Cache(storage))
+            {
+                c.CleanupTime = () => DateTime.UtcNow.AddDays(2);
+                Assert.True(await c.Initialize());
+
+                var data = File.ReadAllBytes("xunit.core.xml");
+                await c.Add("xunit.core.xml", DateTime.MaxValue, data);
+                c.MaximumSize = (int)(data.Length * 2.2);
+                c.CutBackRatio = 0.75;
+
+                await c.Cleanup();
+                Assert.True(await c.Exists("xunit.core.xml"));
+
+                await c.Add("xunit.core2.xml", DateTime.MaxValue.AddDays(-1), data);
+                await c.Add("xunit.assert.xml", DateTime.MaxValue.AddDays(-5), File.ReadAllBytes("xunit.assert.xml"));
+
+                await c.Cleanup();
+
+                var chunks = await storage.GetChunks();
+                Assert.Equal(1, chunks.Count(ch => ch.Type == ChunkTypes.Head));
+                Assert.Equal(1, chunks.Count(ch => ch.Type == ChunkTypes.Data));
+                Assert.True(await c.Exists("xunit.core.xml"));
+                storage.Info.Refresh();
+                Assert.True(storage.Info.Length < c.MaximumSize);
+            }
+        }
+
+        [Fact]
         public async void GetFile()
         {
             File.Delete("cache.blob");

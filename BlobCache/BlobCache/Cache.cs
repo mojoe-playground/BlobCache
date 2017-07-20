@@ -135,9 +135,44 @@
                 foreach (var c in chunks.Where(ch => ch.Type == ChunkTypes.Data && ch.Added < oldDataCutoff && !goodData.ContainsKey(ch.Id) && !ch.Changing).ToList())
                     await Storage.RemoveChunk(sc => sc.Chunks.FirstOrDefault(ch => ch.Id == c.Id && ch.Type == c.Type && ch.Position == c.Position && ch.Size == c.Size && ch.UserData == c.UserData));
 
+                // Cut excess space at the storage end
+                await Storage.CutBackPadding();
+
+                if (MaximumSize == 0)
+                    return;
+
+                // Check storage size is over maximum
+                var statistics = await Storage.Statistics();
+
+                if (statistics.FileSize < MaximumSize)
+                    return;
+
+                // Calculate target size to slim down
+                var targetSize = MaximumSize * CutBackRatio;
+
+                // Order heads by remaining time of the record then oldest first.
+                heads = (await Heads(null)).OrderBy(h=>h.TimeToLive).ThenBy(h=>h.HeadChunk.Added).ToList();
+
+                // Get the size to shred from storage
+                var spaceNeeded = statistics.FileSize - targetSize;
+                foreach (var h in heads)
+                {
+                    if (spaceNeeded < 0)
+                        break;
+
+                    await Remove(h.Key);
+
+                    // Shred weight of the record (overhead not calculated, a litle extra shredded weight is not a problem)
+                    spaceNeeded -= h.Length;
+                }
+
+                // Cut excess space at the storage end again
                 await Storage.CutBackPadding();
             });
         }
+
+        public long MaximumSize { get; set; }
+        public double CutBackRatio { get; set; } = 0.8;
 
         public void Dispose()
         {
