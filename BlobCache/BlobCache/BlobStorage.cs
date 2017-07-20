@@ -29,6 +29,11 @@
             Dispose();
         }
 
+        /// <summary>
+        ///     Gets a value indicating whether the cache is initialized
+        /// </summary>
+        public bool IsInitialized { get; private set; }
+
         private ConcurrencyHandler ConcurrencyHandler { get; set; }
 
         private Guid Id { get; set; }
@@ -208,6 +213,7 @@
                 CheckBlobStorageHeader();
 
                 await CheckInitialization();
+                IsInitialized = true;
             }
             catch (NotSupportedException)
             {
