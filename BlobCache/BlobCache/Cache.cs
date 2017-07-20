@@ -47,13 +47,17 @@
             var freeSize = 1u;
             while (remaining > 0)
             {
-                // If data is bigger than 1k get the free spaces from storage and try to fill them up. To minimize fragmentation use free blocks greater than 1 / 20 of the data size.
-                // If data is smaller than 1k and there is a free slot with enough space storage will save there
-                if (freeSize > 0)
-                    freeSize = remaining > 1024 ? (await Storage.GetFreeChunkSizes()).FirstOrDefault(s => s > remaining / 20) : 0u;
+                // Split data to 5MB blocks
+                var blockRemaining = Math.Min(remaining, 5 * 1024 * 1024);
 
-                var len = remaining;
-                len = Math.Min(len, freeSize > 0 ? freeSize : 5 * 1024 * 1024);
+                // If block is bigger than 1k get the free spaces from storage and try to fill them up. To minimize fragmentation use free chunks greater than 1 / 20 of the block size.
+                // If block is smaller than 1k do not look for free space because storage will look for a free chunk with enough space
+                if (freeSize > 0)
+                    freeSize = blockRemaining > 1024 ? (await Storage.GetFreeChunkSizes()).FirstOrDefault(s => s > blockRemaining / 20) : 0u;
+
+                var len = blockRemaining;
+                if (freeSize > 0)
+                    len = Math.Min(len, freeSize);
 
                 var buffer = new byte[len];
 
