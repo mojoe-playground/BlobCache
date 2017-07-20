@@ -88,7 +88,7 @@
                     if (info.Initialized)
                         return;
 
-                    info.Chunks = new List<StorageChunk>();
+                    info.ChunkList = new List<StorageChunk>();
                     using (var f = Open())
                     using (var br = new BinaryReader(f, Encoding.UTF8))
                     {
@@ -98,7 +98,7 @@
                             try
                             {
                                 position = f.Position;
-                                info.Chunks.Add(StorageChunk.FromStorage(br));
+                                info.ChunkList.Add(StorageChunk.FromStorage(br));
                             }
                             catch (InvalidDataException)
                             {
@@ -174,21 +174,21 @@
                                 chunk = new StorageChunk(free.Id, userData, chunkType, position,
                                         size)
                                     {Changing = true};
-                                info.Chunks[info.Chunks.IndexOf(free)] = chunk;
+                                info.ChunkList[info.ChunkList.IndexOf(free)] = chunk;
                                 free = default(StorageChunk);
                             }
                             else
                             {
                                 // chunk size < free space size, remove chunk sized portion of the free space
-                                var index = info.Chunks.IndexOf(free);
+                                var index = info.ChunkList.IndexOf(free);
                                 var remaining = free.Size - size - StorageChunk.ChunkHeaderSize;
                                 free = new StorageChunk(free.Id, 0, ChunkTypes.Free,
                                         position + size + StorageChunk.ChunkHeaderSize, remaining)
                                     {Changing = true};
-                                info.Chunks[index] = free;
+                                info.ChunkList[index] = free;
                                 chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size)
                                     {Changing = true};
-                                info.Chunks.Add(chunk);
+                                info.ChunkList.Add(chunk);
                             }
                         }
                         else
@@ -200,7 +200,7 @@
                                 : last.Position + last.Size + StorageChunk.ChunkHeaderSize;
                             chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size)
                                 {Changing = true};
-                            info.Chunks.Add(chunk);
+                            info.ChunkList.Add(chunk);
                             f.SetLength(position + StorageChunk.ChunkHeaderSize + size);
                         }
 
@@ -229,18 +229,18 @@
                 {
                     var info = ReadInfo();
 
-                    var index = info.Chunks.IndexOf(chunk);
+                    var index = info.ChunkList.IndexOf(chunk);
                     chunk.Changing = false;
-                    info.Chunks[index] = chunk;
+                    info.ChunkList[index] = chunk;
 
                     if (free.Changing)
                     {
-                        index = info.Chunks.IndexOf(free);
+                        index = info.ChunkList.IndexOf(free);
                         free.Changing = false;
-                        info.Chunks[index] = free;
+                        info.ChunkList[index] = free;
                     }
 
-                    info.Version++;
+                    info.AddedVersion++;
                     WriteInfo(info);
                 }
 
@@ -248,7 +248,7 @@
             });
         }
 
-        private uint GetId(List<StorageChunk> chunks)
+        private uint GetId(IReadOnlyList<StorageChunk> chunks)
         {
             var id = 1u;
             foreach (var c in chunks.OrderBy(c => c.Id))
@@ -319,7 +319,7 @@
                             if (nextChunk.Type == ChunkTypes.Free && !nextChunk.Changing)
                             {
                                 freeSize += StorageChunk.ChunkHeaderSize + nextChunk.Size;
-                                info.Chunks.Remove(nextChunk);
+                                info.ChunkList.Remove(nextChunk);
                             }
 
                             // Check previous chunk is free, combine free space
@@ -331,17 +331,17 @@
                             {
                                 freeSize += StorageChunk.ChunkHeaderSize + previousChunk.Size;
                                 freePosition = previousChunk.Position;
-                                info.Chunks.Remove(previousChunk);
+                                info.ChunkList.Remove(previousChunk);
                             }
 
                             // Mark the chunk changing while updating the file
-                            var index = info.Chunks.IndexOf(chunk);
+                            var index = info.ChunkList.IndexOf(chunk);
                             chunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition,
                                     freeSize)
                                 {Changing = true};
-                            info.Chunks[index] = chunk;
+                            info.ChunkList[index] = chunk;
 
-                            info.Version++;
+                            info.RemovedVersion++;
                             WriteInfo(info);
                         }
 
@@ -355,9 +355,9 @@
                     {
                         var info = ReadInfo();
 
-                        var index = info.Chunks.IndexOf(chunk);
+                        var index = info.ChunkList.IndexOf(chunk);
                         chunk.Changing = false;
-                        info.Chunks[index] = chunk;
+                        info.ChunkList[index] = chunk;
 
                         WriteInfo(info);
                     }
@@ -424,9 +424,9 @@
                     foreach (var r in chunksToRead)
                     {
                         var chunk = r;
-                        var index = info.Chunks.IndexOf(chunk);
+                        var index = info.ChunkList.IndexOf(chunk);
                         chunk.ReadCount++;
-                        info.Chunks[index] = chunk;
+                        info.ChunkList[index] = chunk;
                     }
 
                     WriteInfo(info);
@@ -462,9 +462,9 @@
                         foreach (var r in chunksToRead)
                         {
                             var chunk = r;
-                            var index = info.Chunks.IndexOf(chunk);
+                            var index = info.ChunkList.IndexOf(chunk);
                             chunk.ReadCount--;
-                            info.Chunks[index] = chunk;
+                            info.ChunkList[index] = chunk;
                             finishedOne = finishedOne || chunk.ReadCount == 0;
                         }
 

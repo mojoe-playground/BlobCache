@@ -14,7 +14,7 @@
         public uint UserData { get; }
         public int ReadCount { get; set; }
 
-        public StorageChunk(uint id, uint userData, int chunkType, long position, uint size)
+        internal StorageChunk(uint id, uint userData, int chunkType, long position, uint size)
         {
             Id = id;
             Type = chunkType;
@@ -25,7 +25,7 @@
             ReadCount = 0;
         }
 
-        public const int ChunkHeaderSize = 16;
+        internal const int ChunkHeaderSize = 16;
 
         internal static StorageChunk FromStorage(BinaryReader reader)
         {
