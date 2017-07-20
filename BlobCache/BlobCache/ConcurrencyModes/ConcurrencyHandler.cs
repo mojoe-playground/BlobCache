@@ -16,22 +16,22 @@
             GC.SuppressFinalize(this);
         }
 
-        public abstract IDisposable ReadLock(int timeout);
-
-        public abstract IDisposable WriteLock(int timeout);
-
         public abstract StorageInfo ReadInfo();
 
-        public abstract void WriteInfo(StorageInfo info);
-
-        // Should wait for manual signal
-        public abstract void WaitForReadFinish();
+        public abstract IDisposable ReadLock(int timeout);
 
         // Should set manual signal
         public abstract void SignalReadFinish();
 
         // Should reset manual signal
         public abstract void SignalWaitRequired();
+
+        // Should wait for manual signal
+        public abstract void WaitForReadFinish();
+
+        public abstract void WriteInfo(StorageInfo info);
+
+        public abstract IDisposable WriteLock(int timeout);
 
         protected virtual void Dispose(bool disposing)
         {

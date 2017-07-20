@@ -20,6 +20,8 @@
             Timeout = 5000;
         }
 
+        protected bool IsGlobal { get; set; } = false;
+
         private MemoryMappedFile Memory
         {
             get
@@ -36,8 +38,6 @@
                 return _mmf;
             }
         }
-
-        protected bool IsGlobal { get; set; } = false;
 
         private GlobalReaderWriterLocker ReaderWriterLock
         {
@@ -56,28 +56,6 @@
             }
         }
 
-        protected virtual MemoryMappedFile CreateMemoryMappedFile()
-        {
-            var security = new MemoryMappedFileSecurity();
-            var rule = new AccessRule<MemoryMappedFileRights>(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
-                MemoryMappedFileRights.FullControl, AccessControlType.Allow);
-            security.AddAccessRule(rule);
-
-            return MemoryMappedFile.CreateOrOpen($"{(IsGlobal ? "Global\\" : "")}BlobStorage-{Id}-Info",
-                1024 * 1024, MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.None, security,
-                HandleInheritability.None);
-        }
-
-        public override IDisposable ReadLock(int timeout)
-        {
-            return ReaderWriterLock.ReadLock(timeout);
-        }
-
-        public override IDisposable WriteLock(int timeout)
-        {
-            return ReaderWriterLock.WriteLock(timeout);
-        }
-
         public override StorageInfo ReadInfo()
         {
             using (var s = Memory.CreateViewStream())
@@ -86,17 +64,9 @@
             }
         }
 
-        public override void WriteInfo(StorageInfo info)
+        public override IDisposable ReadLock(int timeout)
         {
-            using (var s = Memory.CreateViewStream())
-            {
-                info.WriteToStream(s);
-            }
-        }
-
-        public override void WaitForReadFinish()
-        {
-            ReaderWriterLock.ReadEvent.WaitOne();
+            return ReaderWriterLock.ReadLock(timeout);
         }
 
         public override void SignalReadFinish()
@@ -107,6 +77,33 @@
         public override void SignalWaitRequired()
         {
             ReaderWriterLock.ReadEvent.Reset();
+        }
+
+        public override void WaitForReadFinish()
+        {
+            ReaderWriterLock.ReadEvent.WaitOne();
+        }
+
+        public override void WriteInfo(StorageInfo info)
+        {
+            using (var s = Memory.CreateViewStream())
+            {
+                info.WriteToStream(s);
+            }
+        }
+
+        public override IDisposable WriteLock(int timeout)
+        {
+            return ReaderWriterLock.WriteLock(timeout);
+        }
+
+        protected virtual MemoryMappedFile CreateMemoryMappedFile()
+        {
+            var security = new MemoryMappedFileSecurity();
+            var rule = new AccessRule<MemoryMappedFileRights>(new SecurityIdentifier(WellKnownSidType.WorldSid, null), MemoryMappedFileRights.FullControl, AccessControlType.Allow);
+            security.AddAccessRule(rule);
+
+            return MemoryMappedFile.CreateOrOpen($"{(IsGlobal ? "Global\\" : "")}BlobStorage-{Id}-Info", 1024 * 1024, MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.None, security, HandleInheritability.None);
         }
 
         protected override void Dispose(bool disposing)
@@ -128,28 +125,21 @@
 
             public GlobalReaderWriterLocker(Guid id, bool global)
             {
-                var allowEveryoneRule = new MutexAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
-                    MutexRights.FullControl, AccessControlType.Allow);
+                var allowEveryoneRule = new MutexAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), MutexRights.FullControl, AccessControlType.Allow);
                 var securitySettings = new MutexSecurity();
                 securitySettings.AddAccessRule(allowEveryoneRule);
 
-                _mutex = new Mutex(false, $"{(global ? "Global\\" : "")}BlobStorage-{id}-WriteLock", out _,
-                    securitySettings);
+                _mutex = new Mutex(false, $"{(global ? "Global\\" : "")}BlobStorage-{id}-WriteLock", out _, securitySettings);
 
                 var semaphoreSecurity = new SemaphoreSecurity();
-                var semaphoreRule = new SemaphoreAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
-                    SemaphoreRights.FullControl, AccessControlType.Allow);
+                var semaphoreRule = new SemaphoreAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), SemaphoreRights.FullControl, AccessControlType.Allow);
                 semaphoreSecurity.AddAccessRule(semaphoreRule);
-                _semaphore = new Semaphore(SemaphoreCount, SemaphoreCount,
-                    $"{(global ? "Global\\" : "")}BlobStorage-{id}-ReadLock", out _,
-                    semaphoreSecurity);
+                _semaphore = new Semaphore(SemaphoreCount, SemaphoreCount, $"{(global ? "Global\\" : "")}BlobStorage-{id}-ReadLock", out _, semaphoreSecurity);
 
                 var eventSecurity = new EventWaitHandleSecurity();
-                var eventRule = new EventWaitHandleAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
-                    EventWaitHandleRights.FullControl, AccessControlType.Allow);
+                var eventRule = new EventWaitHandleAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), EventWaitHandleRights.FullControl, AccessControlType.Allow);
                 eventSecurity.AddAccessRule(eventRule);
-                ReadEvent = new EventWaitHandle(true, EventResetMode.ManualReset,
-                    $"{(global ? "Global\\" : "")}BlobStorage-{id}-ReadSignal", out _, eventSecurity);
+                ReadEvent = new EventWaitHandle(true, EventResetMode.ManualReset, $"{(global ? "Global\\" : "")}BlobStorage-{id}-ReadSignal", out _, eventSecurity);
             }
 
             public EventWaitHandle ReadEvent { get; }
@@ -177,6 +167,7 @@
                     {
                         lockTaken = true;
                     }
+
                     // Wait for a semaphore slot.
                     if (!_semaphore.WaitOne(RealTimeout(timeout, sw)))
                         throw new TimeoutException();
@@ -249,7 +240,7 @@
                 if (timeout <= 0)
                     return timeout;
 
-                return (int) Math.Max(1, timeout - sw.ElapsedMilliseconds);
+                return (int)Math.Max(1, timeout - sw.ElapsedMilliseconds);
             }
 
             private class LockRelease : IDisposable

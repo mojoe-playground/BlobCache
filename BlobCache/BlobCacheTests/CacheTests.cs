@@ -58,6 +58,23 @@
         }
 
         [Fact]
+        public async void Multi()
+        {
+            File.Delete("cache.blob");
+            using (var c1 = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
+            using (var c2 = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
+            {
+                Assert.True(await c1.Initialize());
+                Assert.True(await c2.Initialize());
+
+                await c1.Add("xunit.core.xml", DateTime.MaxValue, File.ReadAllBytes("xunit.core.xml"));
+                Assert.True(await c2.Exists("xunit.core.xml"));
+                Assert.True(await c2.Remove("xunit.core.xml"));
+                Assert.Null(await c1.Get("xunit.core.xml"));
+            }
+        }
+
+        [Fact]
         public async void Overwrite()
         {
             File.Delete("cache.blob");
@@ -72,8 +89,7 @@
                     File.ReadAllBytes("xunit.execution.desktop.xml"));
             }
 
-            Assert.True(new FileInfo("cache.blob").Length < new FileInfo("xunit.core.xml").Length +
-                        new FileInfo("xunit.assert.xml").Length + new FileInfo("xunit.execution.desktop.xml").Length);
+            Assert.True(new FileInfo("cache.blob").Length < new FileInfo("xunit.core.xml").Length + new FileInfo("xunit.assert.xml").Length + new FileInfo("xunit.execution.desktop.xml").Length);
         }
 
         [Fact]
@@ -93,25 +109,7 @@
                     File.ReadAllBytes("xunit.execution.desktop.xml"));
             }
 
-            Assert.True(new FileInfo("cache.blob").Length < new FileInfo("xunit.core.xml").Length +
-                        new FileInfo("xunit.assert.xml").Length + new FileInfo("xunit.execution.desktop.xml").Length);
-        }
-
-        [Fact]
-        public async void Multi()
-        {
-            File.Delete("cache.blob");
-            using (var c1 = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
-            using (var c2 = new Cache(new BlobStorage("cache.blob", new AppDomainConcurrencyHandler())))
-            {
-                Assert.True(await c1.Initialize());
-                Assert.True(await c2.Initialize());
-
-                await c1.Add("xunit.core.xml", DateTime.MaxValue, File.ReadAllBytes("xunit.core.xml"));
-                Assert.True(await c2.Exists("xunit.core.xml"));
-                Assert.True(await c2.Remove("xunit.core.xml"));
-                Assert.Null(await c1.Get("xunit.core.xml"));
-            }
+            Assert.True(new FileInfo("cache.blob").Length < new FileInfo("xunit.core.xml").Length + new FileInfo("xunit.assert.xml").Length + new FileInfo("xunit.execution.desktop.xml").Length);
         }
     }
 }

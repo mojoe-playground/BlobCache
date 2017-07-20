@@ -26,16 +26,77 @@
 
         private BlobStorage Storage { get; }
 
+        public async Task Add(string key, DateTime timeToLive, byte[] data)
+        {
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+            var hash = GetHash(key);
+
+            // Get old records, will be removed at the end
+            var heads = await Heads(key);
+
+            var position = 0u;
+            var remaining = (uint)data.Length;
+            var ids = new List<uint>();
+
+            // Save data first
+            var freeSize = 1u;
+            while (remaining > 0)
+            {
+                // If data is bigger than 1k get the free spaces from storage and try to fill them up. To minimize fragmentation use free blocks greater than 1 / 20 of the data size.
+                // If data is smaller than 1k and there is a free slot with enough space storage will save there
+                if (freeSize > 0)
+                    freeSize = remaining > 1024 ? (await Storage.GetFreeChunkSizes()).FirstOrDefault(s => s > remaining / 20) : 0u;
+
+                var len = remaining;
+                if (freeSize > 0)
+                    len = Math.Min(len, freeSize);
+
+                var buffer = new byte[len];
+
+                Array.Copy(data, position, buffer, 0, len);
+
+                var chunk = await Storage.AddChunk(ChunkTypes.Data, hash, buffer);
+
+                position += len;
+                remaining -= len;
+                ids.Add(chunk.Id);
+            }
+
+            // Save header
+            var header = new CacheHead { Key = key, TimeToLive = timeToLive, Chunks = ids, Length = data.Length };
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms, Encoding.UTF8, true))
+            {
+                header.ToStream(w);
+
+                await Storage.AddChunk(ChunkTypes.Head, hash, ms.ToArray());
+            }
+
+            // Remove old heads
+            foreach (var h in heads)
+            {
+                await Storage.RemoveChunk((sc, v) =>
+                {
+                    var l = sc.Where(c => c.Id == h.HeadChunk.Id && c.Type == ChunkTypes.Head && c.UserData == hash).ToList();
+                    if (l.Count == 0)
+                        return null;
+                    return l.First();
+                });
+                foreach (var ch in h.ValidChunks)
+                    await Storage.RemoveChunk((sc, v) =>
+                    {
+                        var l = sc.Where(c => c.Id == ch.Id && c.Type == ChunkTypes.Data && c.UserData == hash).ToList();
+                        if (l.Count == 0)
+                            return null;
+                        return l.First();
+                    });
+            }
+        }
+
         public void Dispose()
         {
             Storage?.Dispose();
-        }
-
-        private async Task<CacheHead> ValidHead(string key)
-        {
-            var n = DateTime.Now;
-            return (await Heads(key)).LastOrDefault(h => h.HeadChunk.Type == ChunkTypes.Head &&
-                                                         h.Chunks.Count == h.ValidChunks.Count && h.TimeToLive > n);
         }
 
         public async Task<bool> Exists(string key)
@@ -79,78 +140,6 @@
             return await Storage.Initialize();
         }
 
-        public async Task Add(string key, DateTime timeToLive, byte[] data)
-        {
-            if (data == null)
-                throw new ArgumentNullException(nameof(data));
-            var hash = GetHash(key);
-
-            // Get old records, will be removed at the end
-            var heads = await Heads(key);
-
-            var position = 0u;
-            var remaining = (uint) data.Length;
-            var ids = new List<uint>();
-
-            // Save data first
-            var freeSize = 1u;
-            while (remaining > 0)
-            {
-                // If data is bigger than 1k get the free spaces from storage and try to fill them up. To minimize fragmentation use free blocks greater than 1 / 20 of the data size.
-                // If data is smaller than 1k and there is a free slot with enough space storage will save there
-                if (freeSize > 0)
-                    freeSize = remaining > 1024
-                        ? (await Storage.GetFreeChunkSizes()).FirstOrDefault(s => s > remaining / 20)
-                        : 0u;
-
-                var len = remaining;
-                if (freeSize > 0)
-                    len = Math.Min(len, freeSize);
-
-                var buffer = new byte[len];
-
-                Array.Copy(data, position, buffer, 0, len);
-
-                var chunk = await Storage.AddChunk(ChunkTypes.Data, hash, buffer);
-
-                position += len;
-                remaining -= len;
-                ids.Add(chunk.Id);
-            }
-
-            // Save header
-            var header = new CacheHead {Key = key, TimeToLive = timeToLive, Chunks = ids, Length = data.Length};
-            using (var ms = new MemoryStream())
-            using (var w = new BinaryWriter(ms, Encoding.UTF8, true))
-            {
-                header.ToStream(w);
-
-                await Storage.AddChunk(ChunkTypes.Head, hash, ms.ToArray());
-            }
-
-            // Remove old heads
-            foreach (var h in heads)
-            {
-                await Storage.RemoveChunk((sc, v) =>
-                {
-                    var l = sc.Where(c => c.Id == h.HeadChunk.Id && c.Type == ChunkTypes.Head && c.UserData == hash)
-                        .ToList();
-                    if (l.Count == 0)
-                        return null;
-                    return l.First();
-                });
-                foreach (var ch in h.ValidChunks)
-                    await Storage.RemoveChunk((sc, v) =>
-                    {
-                        var l = sc.Where(c => c.Id == ch.Id && c.Type == ChunkTypes.Data && c.UserData == hash)
-                            .ToList();
-                        if (l.Count == 0)
-                            return null;
-                        return l.First();
-                    });
-            }
-        }
-
         public async Task<bool> Remove(string key)
         {
             var hash = GetHash(key);
@@ -163,8 +152,7 @@
             {
                 await Storage.RemoveChunk((sc, v) =>
                 {
-                    var l = sc.Where(c => c.Id == h.HeadChunk.Id && c.Type == ChunkTypes.Head && c.UserData == hash)
-                        .ToList();
+                    var l = sc.Where(c => c.Id == h.HeadChunk.Id && c.Type == ChunkTypes.Head && c.UserData == hash).ToList();
                     if (l.Count == 0)
                         return null;
                     return l.First();
@@ -172,8 +160,7 @@
                 foreach (var ch in h.ValidChunks)
                     await Storage.RemoveChunk((sc, v) =>
                     {
-                        var l = sc.Where(c => c.Id == ch.Id && c.Type == ChunkTypes.Data && c.UserData == hash)
-                            .ToList();
+                        var l = sc.Where(c => c.Id == ch.Id && c.Type == ChunkTypes.Data && c.UserData == hash).ToList();
                         if (l.Count == 0)
                             return null;
                         return l.First();
@@ -258,8 +245,7 @@
                         continue;
                     head.HeadChunk = h.Chunk;
                     var headHash = GetHash(head.Key);
-                    head.ValidChunks = head.Chunks.Where(c => data.Any(ch => ch.Id == c && ch.UserData == headHash))
-                        .Select(c => data.First(ch => ch.Id == c)).ToList();
+                    head.ValidChunks = head.Chunks.Where(c => data.Any(ch => ch.Id == c && ch.UserData == headHash)).Select(c => data.First(ch => ch.Id == c)).ToList();
                     res.Add(head);
                 }
 
@@ -269,6 +255,12 @@
             }
 
             return res;
+        }
+
+        private async Task<CacheHead> ValidHead(string key)
+        {
+            var n = DateTime.Now;
+            return (await Heads(key)).LastOrDefault(h => h.HeadChunk.Type == ChunkTypes.Head && h.Chunks.Count == h.ValidChunks.Count && h.TimeToLive > n);
         }
     }
 }

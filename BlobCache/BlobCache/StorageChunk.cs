@@ -4,7 +4,7 @@
     using System.IO;
     using System.Text;
 
-    public struct StorageChunk: IEquatable<StorageChunk>
+    public struct StorageChunk : IEquatable<StorageChunk>
     {
         public long Position { get; internal set; }
         public uint Size { get; }
@@ -43,7 +43,7 @@
                 throw new InvalidDataException("Chunk size points outside of stream");
 
             reader.BaseStream.Seek(s, SeekOrigin.Current);
-            return new StorageChunk(i,d, t, p, s);
+            return new StorageChunk(i, d, t, p, s);
         }
 
         internal static StorageChunk FromStream(BinaryReader reader)
@@ -82,7 +82,7 @@
         public override bool Equals(object obj)
         {
             if (ReferenceEquals(null, obj)) return false;
-            return obj is StorageChunk && Equals((StorageChunk) obj);
+            return obj is StorageChunk && Equals((StorageChunk)obj);
         }
 
         public override int GetHashCode()
