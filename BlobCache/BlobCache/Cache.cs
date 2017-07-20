@@ -26,6 +26,8 @@
             CleanupNeeded = Storage.IsInitialized;
         }
 
+        private bool CleanupNeeded { get; }
+
         private BlobStorage Storage { get; }
 
         public async Task Add(string key, DateTime timeToLive, byte[] data)
@@ -93,6 +95,36 @@
                         return l.First();
                     });
             }
+        }
+
+        /// <summary>
+        ///     Optimizes storage, removes dead data
+        /// </summary>
+        /// <returns>Task</returns>
+        public Task Cleanup()
+        {
+            return Task.Run(async () =>
+            {
+                var heads = await Heads(null);
+
+                var now = DateTime.UtcNow;
+
+                // Find invalid headers and remove the record
+                var badHeaders = heads.Where(h => h.TimeToLive < now || h.ValidChunks.Count != h.Chunks.Count).ToList();
+                foreach (var r in badHeaders)
+                    await Remove(r.Key);
+
+                // Find good headers and their data chunk ids
+                var goodHeaders = heads.Where(h => h.TimeToLive >= now && h.ValidChunks.Count == h.Chunks.Count).ToList();
+                var goodData = goodHeaders.SelectMany(d => d.ValidChunks.Select(c => c.Id)).Distinct().ToDictionary(id => id);
+
+                var oldDataCutoff = now.AddDays(-1);
+                var chunks = await Storage.GetChunks();
+
+                // Remove data chunks not belonging to good headers and added more than a day ago
+                foreach (var c in chunks.Where(ch => ch.Type == ChunkTypes.Data && ch.Added < oldDataCutoff && !goodData.ContainsKey(ch.Id) && !ch.Changing))
+                    await Storage.RemoveChunk(sc => sc.Chunks.FirstOrDefault(ch => ch.Id == c.Id && ch.Type == c.Type && ch.Position == c.Position && ch.Size == c.Size && ch.UserData == c.UserData));
+            });
         }
 
         public void Dispose()
@@ -229,19 +261,6 @@
         {
             return string.Equals(key1, key2);
         }
-
-        /// <summary>
-        /// Optimizes storage, removes dead data
-        /// </summary>
-        /// <returns>Task</returns>
-        public Task Cleanup()
-        {
-            return Task.Run(() => {
-                var heads = Heads(null);
-            });
-        }
-
-        private bool CleanupNeeded { get; set; }
 
         private async Task<List<CacheHead>> Heads(string key)
         {
