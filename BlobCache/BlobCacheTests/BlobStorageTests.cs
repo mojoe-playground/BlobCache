@@ -232,5 +232,50 @@
                 Assert.Equal(size, s.Info.Length);
             }
         }
+
+        [Fact]
+        public async void StreamRead()
+        {
+            File.Delete("test.blob");
+            using (var s = new BlobStorage("test.blob"))
+            {
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>());
+
+                var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
+                var c1 = await s.AddChunk(ChunkTypes.Test, 11, data);
+
+                using (var ms = new MemoryStream())
+                {
+                    // ReSharper disable once AccessToDisposedClosure
+                    var res = await s.ReadChunks(c => c.Id == c1.Id, c => ms);
+                    Assert.Equal(data, ms.ToArray());
+                    Assert.Equal(ms, res.First().Data);
+                }
+
+                using (var ms = new MemoryStream())
+                {
+                    // ReSharper disable once AccessToDisposedClosure
+                    var res = await s.ReadChunks(sc => sc.Chunks.Where(c => c.Id == c1.Id), c => ms);
+                    Assert.Equal(data, ms.ToArray());
+                    Assert.Equal(ms, res.First().Data);
+                }
+
+                using (var ms = new MemoryStream())
+                {
+                    // ReSharper disable once AccessToDisposedClosure
+                    var res = await s.ReadChunks(c => c.Id == c1.Id ? ms : null);
+                    Assert.Equal(data, ms.ToArray());
+                    Assert.Equal(ms, res.First().Data);
+                }
+
+                using (var ms = new MemoryStream())
+                {
+                    // ReSharper disable once AccessToDisposedClosure
+                    var res = await s.ReadChunks(sc => sc.Chunks.Where(c => c.Id == c1.Id).Select(c => (c, (Stream)ms)));
+                    Assert.Equal(data, ms.ToArray());
+                    Assert.Equal(ms, res.First().Data);
+                }
+            }
+        }
     }
 }

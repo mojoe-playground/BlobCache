@@ -230,12 +230,74 @@
         /// </param>
         /// <param name="streamCreator">
         ///     Stream creator to create the output streams for the data, input: chunk read, output: stream
-        ///     to use, value indicating whether the stream should be closed or not
+        ///     to use
         /// </param>
-        /// <returns></returns>
-        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, (Stream, bool)> streamCreator)
+        /// <returns>List of chunk, Stream pairs</returns>
+        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator)
         {
             return (await ReadChunksInternal(selector, streamCreator)).Select(r => (r.Chunk, r.Stream)).ToList();
+        }
+
+        /// <summary>
+        ///     Reads chunks from the blob
+        /// </summary>
+        /// <param name="selector">
+        ///     Selector to select which chunks need to be read to which stream, input: available storage info, output:
+        ///     chunks to read with streams to read to
+        /// </param>
+        /// <returns>List of chunk, Stream pairs</returns>
+        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<(StorageChunk, Stream)>> selector)
+        {
+            var streamList = new Dictionary<StorageChunk, Stream>();
+            return (await ReadChunksInternal(sc =>
+            {
+                var list = selector.Invoke(sc).ToList();
+                foreach (var c in list)
+                    streamList[c.Item1] = c.Item2;
+                return list.Select(p => p.Item1);
+            }, c => streamList[c])).Select(r => (r.Chunk, r.Stream)).ToList();
+        }
+
+        /// <summary>
+        ///     Reads chunks from the blob
+        /// </summary>
+        /// <param name="condition">
+        ///     Condition to choose which chunks to read
+        /// </param>
+        /// <param name="streamCreator">
+        ///     Stream creator to create the output streams for the data, input: chunk read, output: stream to use
+        /// </param>
+        /// <returns>List of chunk, Stream pairs</returns>
+        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageChunk, bool> condition, Func<StorageChunk, Stream> streamCreator)
+        {
+            return (await ReadChunksInternal(sc => sc.Chunks.Where(condition), streamCreator)).Select(r => (r.Chunk, r.Stream)).ToList();
+        }
+
+        /// <summary>
+        ///     Reads chunks from the blob
+        /// </summary>
+        /// <param name="selector">
+        ///     Selector to select which chunks need to be read to which stream, input: chunk read, output: stream to use (null
+        ///     stream indicates not to read)
+        /// </param>
+        /// <returns>List of chunk, Stream pairs</returns>
+        public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageChunk, Stream> selector)
+        {
+            var streamList = new Dictionary<StorageChunk, Stream>();
+            return (await ReadChunksInternal(sc =>
+            {
+                var list = new List<StorageChunk>();
+                foreach (var c in sc.Chunks)
+                {
+                    var stream = selector.Invoke(c);
+                    if (stream != null)
+                    {
+                        list.Add(c);
+                        streamList[c] = stream;
+                    }
+                }
+                return list;
+            }, c => streamList[c])).Select(r => (r.Chunk, r.Stream)).ToList();
         }
 
         /// <summary>
@@ -483,7 +545,7 @@
             }
         }
 
-        private Task<List<(StorageChunk Chunk, byte[] Data, Stream Stream)>> ReadChunksInternal(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, (Stream, bool)> streamCreator)
+        private Task<List<(StorageChunk Chunk, byte[] Data, Stream Stream)>> ReadChunksInternal(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
@@ -518,19 +580,11 @@
                     foreach (var r in chunksToRead)
                     {
                         Stream stream = null;
-                        var close = false;
 
                         if (streamCreator != null)
-                            (stream, close) = streamCreator.Invoke(r);
-                        try
-                        {
-                            res.Add(await ReadChunk(r, stream));
-                        }
-                        finally
-                        {
-                            if (close)
-                                stream?.Close();
-                        }
+                            stream = streamCreator.Invoke(r);
+
+                        res.Add(await ReadChunk(r, stream));
                     }
                 }
                 finally
