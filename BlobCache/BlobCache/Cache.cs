@@ -11,8 +11,9 @@
 
     public class Cache : IDisposable
     {
-        private readonly Dictionary<string, List<CacheHead>> _headCache = new Dictionary<string, List<CacheHead>>();
-        private ulong _headCacheVersion;
+        private readonly Dictionary<string, (uint Hash, List<CacheHead> Heads)> _headCache = new Dictionary<string, (uint, List<CacheHead>)>();
+        private ulong _headCacheAddedVersion;
+        private ulong _headCacheRemovedVersion;
 
         public Cache(string fileName)
             : this(new BlobStorage(fileName))
@@ -241,11 +242,25 @@
             {
                 lock (_headCache)
                 {
-                    // Clear cache if cache version not current
-                    if (sc.Version != _headCacheVersion)
+                    // Clear cache if an item removed
+                    if (sc.RemovedVersion != _headCacheRemovedVersion)
                     {
-                        _headCacheVersion = sc.Version;
+                        _headCacheRemovedVersion = _headCacheAddedVersion = sc.RemovedVersion;
                         _headCache.Clear();
+                    }
+
+                    // Remove all head cached data if an item added and check cached non existent data added
+                    // If an existing record is replaced it will trigger an item removal so cache will be cleared there
+                    if (sc.AddedVersion != _headCacheAddedVersion)
+                    {
+                        _headCacheAddedVersion = sc.AddedVersion;
+                        _headCache.Remove(string.Empty);
+
+                        var ids = sc.Chunks.Where(c => c.Type == ChunkTypes.Head).Select(c => c.UserData).Distinct().ToDictionary(c => c);
+
+                        foreach (var k in _headCache.Keys.ToList())
+                            if (_headCache[k].Heads.Count == 0 && ids.ContainsKey(_headCache[k].Hash))
+                                _headCache.Remove(k);
                     }
 
                     // Check whether data is in the cache
@@ -269,10 +284,10 @@
                 {
                     if (_headCache.ContainsKey(key))
                         // Return cached data if key is cached
-                        return _headCache[key].ToList();
+                        return _headCache[key].Heads.ToList();
 
                     // Filter all heads list for the given key
-                    return _headCache[string.Empty].Where(h => KeyEquals(key, h.Key)).ToList();
+                    return _headCache[string.Empty].Heads.Where(h => KeyEquals(key, h.Key)).ToList();
                 }
 
             // Process loaded head records
@@ -292,7 +307,7 @@
 
             lock (_headCache)
             {
-                _headCache[key] = res.ToList();
+                _headCache[key] = (hash, res.ToList());
             }
 
             return res;
