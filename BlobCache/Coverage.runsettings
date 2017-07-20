@@ -29,8 +29,7 @@ Included items must then not match any entries in the exclude list to remain inc
             <!-- Match assembly file paths: -->
             <ModulePaths>
               <Include>
-                <ModulePath>.*CognitiveServices\.dll</ModulePath>
-                <ModulePath>.*CognitiveServices\.Tests\.dll$</ModulePath>
+                <ModulePath>.*Tests.dll</ModulePath>
               </Include>
               <Exclude>
                 <ModulePath>.*CPPUnitTestFramework.*</ModulePath>
