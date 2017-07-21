@@ -61,19 +61,32 @@
         {
             if (data == null)
                 throw new ArgumentNullException(nameof(data));
+
+            using (var ms = new MemoryStream(data))
+            {
+                await Add(key, timeToLive, ms, token);
+            }
+        }
+
+        public async Task Add(string key, DateTime timeToLive, Stream data, CancellationToken token)
+        {
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
             var hash = KeyComparer.GetHash(key);
 
             // Get old records, will be removed at the end
             var heads = await Heads(key, token);
 
-            var position = 0u;
-            var remaining = (uint)data.Length;
+            var length = (int)(data.Length - data.Position);
+            var remaining = (uint)length;
             var ids = new List<uint>();
 
             // Save data first
             var freeSize = 1u;
             while (remaining > 0)
             {
+                token.ThrowIfCancellationRequested();
+
                 // Split data to 5MB blocks
                 var blockRemaining = Math.Min(remaining, 5 * 1024 * 1024);
 
@@ -87,18 +100,22 @@
                     len = Math.Min(len, freeSize);
 
                 var buffer = new byte[len];
-
-                Array.Copy(data, position, buffer, 0, len);
+                var read = 1;
+                var readPosition = 0;
+                while (read > 0 && readPosition < len)
+                {
+                    read = await data.ReadAsync(buffer, readPosition, (int)len - readPosition, token);
+                    readPosition += read;
+                }
 
                 var chunk = await Storage.AddChunk(ChunkTypes.Data, hash, buffer, token);
 
-                position += len;
                 remaining -= len;
                 ids.Add(chunk.Id);
             }
 
             // Save header
-            var header = new CacheHead { Key = key, TimeToLive = timeToLive.ToUniversalTime(), Chunks = ids, Length = data.Length };
+            var header = new CacheHead { Key = key, TimeToLive = timeToLive.ToUniversalTime(), Chunks = ids, Length = length };
             using (var ms = new MemoryStream())
             using (var w = new BinaryWriter(ms, Encoding.UTF8, true))
             {

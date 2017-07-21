@@ -44,10 +44,29 @@
             {
                 Assert.True(await c.Initialize(CancellationToken.None));
 
-                await Assert.ThrowsAsync<ArgumentNullException>(() => c.Add("xunit.core.xml", DateTime.MaxValue, null, CancellationToken.None));
+                await Assert.ThrowsAsync<ArgumentNullException>(() => c.Add("xunit.core.xml", DateTime.MaxValue, (byte[])null, CancellationToken.None));
 
                 await c.Add("xunit.core.xml", DateTime.MaxValue, File.ReadAllBytes("xunit.core.xml"), CancellationToken.None);
                 Assert.Equal(File.ReadAllBytes("xunit.core.xml"), await c.Get("xunit.core.xml", CancellationToken.None));
+            }
+        }
+
+        [Fact]
+        public async void AddStream()
+        {
+            File.Delete("cache.blob");
+            using (var c = new Cache("cache.blob"))
+            {
+                Assert.True(await c.Initialize(CancellationToken.None));
+
+                await Assert.ThrowsAsync<ArgumentNullException>(() => c.Add("xunit.core.xml", DateTime.MaxValue, (Stream)null, CancellationToken.None));
+
+                using (var ms = new MemoryStream(File.ReadAllBytes("xunit.core.xml")))
+                {
+                    ms.Position = 4;
+                    await c.Add("xunit.core.xml", DateTime.MaxValue, ms, CancellationToken.None);
+                }
+                Assert.Equal(File.ReadAllBytes("xunit.core.xml").Skip(4), await c.Get("xunit.core.xml", CancellationToken.None));
             }
         }
 
