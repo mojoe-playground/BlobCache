@@ -102,16 +102,19 @@
 
                 var len = blockRemaining;
                 if (freeSize > 0)
-                    len = Math.Min(len, freeSize);
+                    len = Math.Min(len, freeSize - DataHead.DataHeadSize);
 
-                var buffer = new byte[len];
+                var buffer = new byte[len + DataHead.DataHeadSize];
+
                 var read = 1;
-                var readPosition = 0;
+                var readPosition = DataHead.DataHeadSize;
                 while (read > 0 && readPosition < len)
                 {
-                    read = await data.ReadAsync(buffer, readPosition, (int)len - readPosition, token);
+                    read = await data.ReadAsync(buffer, readPosition, buffer.Length - readPosition, token);
                     readPosition += read;
                 }
+
+                buffer = Encode(buffer, new DataHead(DataCompression.None));
 
                 var chunk = await Storage.AddChunk(ChunkTypes.Data, hash, buffer, token);
 
@@ -239,75 +242,31 @@
 
         public async Task<(bool success, CacheEntryInfo info)> GetWithInfo(string key, Stream target, CancellationToken token)
         {
-            var hash = KeyComparer.GetHash(key);
-            var head = await ValidHead(key, token);
+            var success = false;
+            var info = await GetWithInfo(key,
+                l => { success = true; },
+                d => { target.Write(d, 0, d.Length); },
+                token);
 
-            if (string.IsNullOrEmpty(head.Key))
-                return (false, default(CacheEntryInfo));
-
-            if (head.Length == 0)
-                return (true, InfoFromHead(head));
-
-            var chunks = await Storage.ReadChunks(sc =>
-            {
-                var list = new List<(StorageChunk, Stream)>();
-                foreach (var id in head.Chunks)
-                {
-                    var chunk = sc.Chunks.FirstOrDefault(c => c.Id == id);
-                    if (chunk.UserData != hash || chunk.Type != ChunkTypes.Data)
-                        return null;
-
-                    list.Add((chunk, target));
-                }
-
-                return list;
-            }, token);
-
-            if (chunks.Count == 0)
-                return (false, default(CacheEntryInfo));
-
-            return (true, InfoFromHead(head));
+            return (success, info);
         }
 
         public async Task<(byte[] data, CacheEntryInfo info)> GetWithInfo(string key, CancellationToken token)
         {
-            var hash = KeyComparer.GetHash(key);
-            var head = await ValidHead(key, token);
-
-            if (string.IsNullOrEmpty(head.Key))
-                return (null, default(CacheEntryInfo));
-
-            var result = new byte[head.Length];
-            if (head.Length == 0)
-                return (result, InfoFromHead(head));
+            byte[] result = null;
 
             var position = 0;
 
-            var chunks = await Storage.ReadChunks(sc =>
-            {
-                var list = new List<StorageChunk>();
-                foreach (var id in head.Chunks)
+            var info = await GetWithInfo(key,
+                l => { result = new byte[l]; },
+                d =>
                 {
-                    var chunk = sc.Chunks.FirstOrDefault(c => c.Id == id);
-                    if (chunk.UserData != hash || chunk.Type != ChunkTypes.Data)
-                        return null;
+                    Array.Copy(d, 0, result, position, d.Length);
+                    position += d.Length;
+                },
+                token);
 
-                    list.Add(chunk);
-                }
-
-                return list;
-            }, token);
-
-            if (chunks.Count == 0)
-                return (null, default(CacheEntryInfo));
-
-            foreach (var c in chunks)
-            {
-                Array.Copy(c.Data, 0, result, position, c.Data.Length);
-                position += c.Data.Length;
-            }
-
-            return (result, InfoFromHead(head));
+            return (result, info);
         }
 
         public async Task<bool> Initialize(CancellationToken token)
@@ -366,9 +325,69 @@
             return true;
         }
 
+        private static byte[] Decode(byte[] data)
+        {
+            var head = DataHead.ReadFromByteArray(data);
+
+            switch (head.Compression)
+            {
+                case DataCompression.None:
+                    var res = new byte[data.Length - head.Size];
+                    Array.Copy(data, head.Size, res, 0, res.Length);
+                    return res;
+
+                default:
+                    throw new InvalidOperationException("Invalid cache compression method");
+            }
+        }
+
+        private static byte[] Encode(byte[] buffer, DataHead head)
+        {
+            switch (head.Compression)
+            {
+                case DataCompression.None:
+                    head.WriteToByteArray(buffer, null);
+                    return buffer;
+
+                default:
+                    head.WriteToByteArray(buffer, DataCompression.None);
+                    return buffer;
+            }
+        }
+
         private static CacheEntryInfo InfoFromHead(CacheHead head)
         {
             return new CacheEntryInfo { Added = head.HeadChunk.Added };
+        }
+
+        private async Task<CacheEntryInfo> GetWithInfo(string key, Action<int> initializer, Action<byte[]> processor, CancellationToken token)
+        {
+            var hash = KeyComparer.GetHash(key);
+            var head = await ValidHead(key, token);
+
+            if (string.IsNullOrEmpty(head.Key))
+                return default(CacheEntryInfo);
+
+            initializer(head.Length);
+            if (head.Length == 0)
+                return InfoFromHead(head);
+
+            await Storage.ReadChunks(sc =>
+            {
+                var list = new List<StorageChunk>();
+                foreach (var id in head.Chunks)
+                {
+                    var chunk = sc.Chunks.FirstOrDefault(c => c.Id == id);
+                    if (chunk.UserData != hash || chunk.Type != ChunkTypes.Data)
+                        return null;
+
+                    list.Add(chunk);
+                }
+
+                return list;
+            }, (c, d) => processor(Decode(d)), token);
+
+            return InfoFromHead(head);
         }
 
         private async Task<List<CacheHead>> Heads(string key, CancellationToken token)

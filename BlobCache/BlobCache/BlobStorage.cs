@@ -307,7 +307,9 @@
         /// </remarks>
         public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator, CancellationToken token)
         {
-            return (await ReadChunksInternal(selector, streamCreator, token)).Select(r => (r.Chunk, r.Stream)).ToList();
+            var result = new List<(StorageChunk, Stream)>();
+            await ReadChunksInternal(selector, streamCreator, (c, d, s) => result.Add((c, s)), token);
+            return result;
         }
 
         /// <summary>
@@ -325,14 +327,16 @@
         /// </remarks>
         public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageInfo, IEnumerable<(StorageChunk, Stream)>> selector, CancellationToken token)
         {
+            var result = new List<(StorageChunk, Stream)>();
             var streamList = new Dictionary<StorageChunk, Stream>();
-            return (await ReadChunksInternal(sc =>
+            await ReadChunksInternal(sc =>
             {
                 var list = selector.Invoke(sc).ToList();
                 foreach (var c in list)
                     streamList[c.Item1] = c.Item2;
                 return list.Select(p => p.Item1);
-            }, c => streamList[c], token)).Select(r => (r.Chunk, r.Stream)).ToList();
+            }, c => streamList[c], (c, d, s) => result.Add((c, s)), token);
+            return result;
         }
 
         /// <summary>
@@ -348,7 +352,9 @@
         /// <returns>List of chunk, Stream pairs</returns>
         public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageChunk, bool> condition, Func<StorageChunk, Stream> streamCreator, CancellationToken token)
         {
-            return (await ReadChunksInternal(sc => sc.Chunks.Where(condition), streamCreator, token)).Select(r => (r.Chunk, r.Stream)).ToList();
+            var result = new List<(StorageChunk, Stream)>();
+            await ReadChunksInternal(sc => sc.Chunks.Where(condition), streamCreator, (c, d, s) => result.Add((c, s)), token);
+            return result;
         }
 
         /// <summary>
@@ -362,8 +368,9 @@
         /// <returns>List of chunk, Stream pairs</returns>
         public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageChunk, Stream> selector, CancellationToken token)
         {
+            var result = new List<(StorageChunk, Stream)>();
             var streamList = new Dictionary<StorageChunk, Stream>();
-            return (await ReadChunksInternal(sc =>
+            await ReadChunksInternal(sc =>
             {
                 var list = new List<StorageChunk>();
                 foreach (var c in sc.Chunks)
@@ -376,7 +383,8 @@
                     }
                 }
                 return list;
-            }, c => streamList[c], token)).Select(r => (r.Chunk, r.Stream)).ToList();
+            }, c => streamList[c], (c, d, s) => result.Add((c, s)), token);
+            return result;
         }
 
         /// <summary>
@@ -390,7 +398,26 @@
         /// <returns>List of chunk, byte[] pairs in the order of the selector's result</returns>
         public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, CancellationToken token)
         {
-            return (await ReadChunksInternal(selector, null, token)).Select(r => (r.Chunk, r.Data)).ToList();
+            var result = new List<(StorageChunk, byte[])>();
+            await ReadChunksInternal(selector, null, (c, d, s) => result.Add((c, d)), token);
+            return result;
+        }
+
+        /// <summary>
+        ///     Reads chunks from the blob
+        /// </summary>
+        /// <param name="selector">
+        ///     Selector to choose which chunks to read, input: storage info, chunk data version, output:
+        ///     chunks to read
+        /// </param>
+        /// <param name="processor">Chunk data processor, called in the order of selector's result</param>
+        /// <param name="token">Cancellation token</param>
+        public async Task ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Action<StorageChunk, byte[]> processor, CancellationToken token)
+        {
+            if (processor == null)
+                throw new ArgumentNullException(nameof(processor));
+
+            await ReadChunksInternal(selector, null, (c, d, s) => processor(c, d), token);
         }
 
         /// <summary>
@@ -403,7 +430,9 @@
         /// <returns>List of chunk, byte[] pairs</returns>
         public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageChunk, bool> condition, CancellationToken token)
         {
-            return (await ReadChunksInternal(sc => sc.Chunks.Where(condition), null, token)).Select(r => (r.Chunk, r.Data)).ToList();
+            var result = new List<(StorageChunk, byte[])>();
+            await ReadChunksInternal(sc => sc.Chunks.Where(condition), null, (c, d, s) => result.Add((c, d)), token);
+            return result;
         }
 
         /// <summary>
@@ -652,7 +681,7 @@
             }
         }
 
-        private Task<List<(StorageChunk Chunk, byte[] Data, Stream Stream)>> ReadChunksInternal(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator, CancellationToken token)
+        private Task ReadChunksInternal(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator, Action<StorageChunk, byte[], Stream> resultProcessor, CancellationToken token)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
@@ -660,7 +689,6 @@
             return Task.Run(async () =>
             {
                 List<StorageChunk> chunksToRead;
-                var res = new List<(StorageChunk, byte[], Stream)>();
 
                 using (WriteLock(ConcurrencyHandler.Timeout, token))
                 {
@@ -668,7 +696,7 @@
 
                     chunksToRead = selector.Invoke(info.FilterChunks(c => !c.Changing && c.Type != ChunkTypes.Free))?.ToList();
                     if (chunksToRead == null)
-                        return res;
+                        return;
 
                     foreach (var r in chunksToRead)
                     {
@@ -693,7 +721,8 @@
                         if (streamCreator != null)
                             stream = streamCreator.Invoke(r);
 
-                        res.Add(await ReadChunk(r, stream, token));
+                        var res = await ReadChunk(r, stream, token);
+                        resultProcessor(res.Item1, res.Item2, res.Item3);
                     }
                 }
                 finally
@@ -717,8 +746,6 @@
 
                 if (finishedOne)
                     ConcurrencyHandler.SignalReadFinish();
-
-                return res;
             }, token);
         }
 
