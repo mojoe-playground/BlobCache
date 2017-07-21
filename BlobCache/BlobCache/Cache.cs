@@ -3,6 +3,7 @@
     using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.IO.Compression;
     using System.Linq;
     using System.Security;
     using System.Text;
@@ -50,6 +51,9 @@
         {
             Dispose();
         }
+
+        [PublicAPI]
+        public bool CanCompress { get; set; }
 
         [PublicAPI]
         public double CutBackRatio { get; set; } = 0.8;
@@ -114,7 +118,7 @@
                     readPosition += read;
                 }
 
-                buffer = Encode(buffer, new DataHead(DataCompression.None));
+                buffer = Encode(buffer, new DataHead(CanCompress ? DataCompression.Deflate : DataCompression.None));
 
                 var chunk = await Storage.AddChunk(ChunkTypes.Data, hash, buffer, token);
 
@@ -336,6 +340,22 @@
                     Array.Copy(data, head.Size, res, 0, res.Length);
                     return res;
 
+                case DataCompression.Deflate:
+                    using (var input = new MemoryStream(data))
+                    {
+                        input.Position = head.Size;
+
+                        using (var output = new MemoryStream())
+                        {
+                            using (var dstream = new DeflateStream(input, CompressionMode.Decompress))
+                            {
+                                dstream.CopyTo(output);
+                            }
+
+                            return output.ToArray();
+                        }
+                    }
+
                 default:
                     throw new InvalidOperationException("Invalid cache compression method");
             }
@@ -347,6 +367,22 @@
             {
                 case DataCompression.None:
                     head.WriteToByteArray(buffer, null);
+                    return buffer;
+
+                case DataCompression.Deflate:
+                    using (var output = new MemoryStream())
+                    {
+                        head.WriteToStream(output, null);
+                        using (var dstream = new DeflateStream(output, CompressionLevel.Optimal, true))
+                        {
+                            dstream.Write(buffer, DataHead.DataHeadSize, buffer.Length - DataHead.DataHeadSize);
+                        }
+
+                        if (output.Length < buffer.Length)
+                            return output.ToArray();
+                    }
+
+                    head.WriteToByteArray(buffer, DataCompression.None);
                     return buffer;
 
                 default:

@@ -52,6 +52,39 @@
         }
 
         [Fact]
+        public async void Compress()
+        {
+            File.Delete("cache.blob");
+            var s = new BlobStorage("cache.blob");
+            using (var c = new Cache(s))
+            {
+                Assert.True(await c.Initialize(CancellationToken.None));
+
+                var data = File.ReadAllBytes("xunit.core.xml");
+                await c.Add("xunit.core.xml", DateTime.MaxValue, data, CancellationToken.None);
+                Assert.Equal(data, await c.Get("xunit.core.xml", CancellationToken.None));
+
+                s.Info.Refresh();
+                Assert.False(data.Length > s.Info.Length);
+            }
+
+            File.Delete("cache.blob");
+            s = new BlobStorage("cache.blob");
+            using (var c = new Cache(s))
+            {
+                c.CanCompress = true;
+                Assert.True(await c.Initialize(CancellationToken.None));
+
+                var data = File.ReadAllBytes("xunit.core.xml");
+                await c.Add("xunit.core.xml", DateTime.MaxValue, data, CancellationToken.None);
+                Assert.Equal(data, await c.Get("xunit.core.xml", CancellationToken.None));
+
+                s.Info.Refresh();
+                Assert.True(data.Length > s.Info.Length);
+            }
+        }
+
+        [Fact]
         public async void GetWithInfo()
         {
             File.Delete("cache.blob");
