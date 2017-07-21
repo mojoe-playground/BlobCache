@@ -242,6 +242,7 @@
                 res = await s.ReadChunks(c => c.Id == c2.Id, CancellationToken.None);
                 Assert.Equal(data, res.First().Data);
 
+                s.Info.Refresh();
                 var size = s.Info.Length;
 
                 await s.RemoveChunk(sc => sc.Chunks.FirstOrDefault(c => c.Id == c1.Id), CancellationToken.None);
