@@ -75,7 +75,7 @@
         {
             return Task.Run(async () =>
             {
-                var l = data.Length;
+                var l = data.Length - data.Position;
 
                 if (l > uint.MaxValue)
                     throw new InvalidDataException("Chunk length greater than uint.MaxValue");

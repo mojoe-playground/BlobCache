@@ -29,6 +29,30 @@
         }
 
         [Fact]
+        public async void AddChunkStream()
+        {
+            File.Delete("test.blob");
+            using (var s = new BlobStorage("test.blob"))
+            {
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
+
+                var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
+                using (var ms = new MemoryStream(data))
+                {
+                    ms.Position = 4;
+                    var c1 = await s.AddChunk(ChunkTypes.Test, 11, ms, CancellationToken.None);
+
+                    Assert.Equal(1u, c1.Id);
+                    Assert.Equal(11u, c1.UserData);
+                    Assert.Equal((uint)data.Length - 4, c1.Size);
+                }
+
+                var res = await s.ReadChunks(c => c.Id == 1, CancellationToken.None);
+                Assert.Equal(data.Skip(4), res.First().Data);
+            }
+        }
+
+        [Fact]
         public async void ChunkIdReuse()
         {
             File.Delete("test.blob");
