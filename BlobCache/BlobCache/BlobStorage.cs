@@ -86,7 +86,7 @@
 
                 StorageChunk chunk;
 
-                using (var f = Open())
+                using (var f = await Open(token))
                 using (var w = new BinaryWriter(f, Encoding.UTF8))
                 {
                     StorageChunk free;
@@ -200,9 +200,9 @@
         /// <returns>Task</returns>
         public Task CutBackPadding(CancellationToken token)
         {
-            return Task.Run(() =>
+            return Task.Run(async () =>
             {
-                using (var f = Open())
+                using (var f = await Open(token))
                 {
                     using (WriteLock(ConcurrencyHandler.Timeout, token))
                     {
@@ -457,7 +457,7 @@
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
 
-            return Task.Run(() =>
+            return Task.Run(async () =>
             {
                 var wait = false;
 
@@ -467,7 +467,7 @@
                     if (wait)
                         ConcurrencyHandler.WaitForReadFinish(token);
 
-                    using (var f = Open())
+                    using (var f = await Open(token))
                     using (var w = new BinaryWriter(f, Encoding.UTF8))
                     using (WriteLock(ConcurrencyHandler.Timeout, token))
                     {
@@ -567,7 +567,7 @@
         private void CheckBlobStorageHeader()
         {
             _mainLock?.Close();
-            _mainLock = Open();
+            _mainLock = OpenFile();
 
             if (_mainLock.Length < HeaderSize)
                 throw new NotSupportedException("Unknown file format (file too short)");
@@ -597,7 +597,7 @@
                         return;
 
                     info.ChunkList = new List<StorageChunk>();
-                    using (var f = Open())
+                    using (var f = OpenFile())
                     using (var br = new BinaryReader(f, Encoding.UTF8))
                     {
                         f.Position = 24;
@@ -653,14 +653,22 @@
             return id;
         }
 
-        private FileStream Open()
+        private async Task<FileStream> Open(CancellationToken token)
+        {
+            Info.Refresh();
+            if (!Info.Exists)
+                await Initialize<SessionConcurrencyHandler>(token);
+            return OpenFile();
+        }
+
+        private FileStream OpenFile()
         {
             return new FileStream(Info.FullName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         }
 
         private async Task<(StorageChunk, byte[], Stream)> ReadChunk(StorageChunk chunk, Stream target, CancellationToken token)
         {
-            using (var f = Open())
+            using (var f = await Open(token))
             {
                 var res = new byte[target == null ? chunk.Size : Math.Min(chunk.Size, 64 * 1024)];
                 f.Position = chunk.Position + StorageChunk.ChunkHeaderSize;
