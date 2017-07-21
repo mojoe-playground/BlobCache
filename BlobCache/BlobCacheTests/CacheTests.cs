@@ -66,14 +66,16 @@
                 await c.Add("xunit.core.xml", DateTime.MaxValue, File.ReadAllBytes("xunit.core.xml"), CancellationToken.None);
                 r = await c.GetWithInfo("xunit.core.xml", CancellationToken.None);
                 Assert.Equal(File.ReadAllBytes("xunit.core.xml"), r.data);
-                Assert.True(now < r.info.Added);
+                Assert.True(now <= r.info.Added);
+                Assert.True(r.info.Added <= DateTime.UtcNow);
 
                 now = DateTime.UtcNow;
                 var data = new byte[0];
                 await c.Add("null.xml", DateTime.MaxValue, data, CancellationToken.None);
                 r = await c.GetWithInfo("null.xml", CancellationToken.None);
                 Assert.Equal(data, r.data);
-                Assert.True(now < r.info.Added);
+                Assert.True(now <= r.info.Added);
+                Assert.True(r.info.Added <= DateTime.UtcNow);
             }
         }
 
@@ -98,7 +100,8 @@
                     var r = await c.GetWithInfo("xunit.core.xml", ms, CancellationToken.None);
                     Assert.True(r.success);
                     Assert.Equal(File.ReadAllBytes("xunit.core.xml"), ms.ToArray());
-                    Assert.True(now < r.info.Added);
+                    Assert.True(now <= r.info.Added);
+                    Assert.True(r.info.Added <= DateTime.UtcNow);
                 }
 
                 using (var ms = new MemoryStream())
@@ -109,7 +112,8 @@
                     var r = await c.GetWithInfo("null.xml", ms, CancellationToken.None);
                     Assert.True(r.success);
                     Assert.Equal(data, ms.ToArray());
-                    Assert.True(now < r.info.Added);
+                    Assert.True(now <= r.info.Added);
+                    Assert.True(r.info.Added <= DateTime.UtcNow);
                 }
             }
         }
