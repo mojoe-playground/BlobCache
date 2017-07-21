@@ -39,6 +39,11 @@
         {
         }
 
+        ~Cache()
+        {
+            Dispose();
+        }
+
         public Cache(BlobStorage storage, IKeyComparer keyComparer)
         {
             Storage = storage;
@@ -212,6 +217,7 @@
         public void Dispose()
         {
             Storage?.Dispose();
+            GC.SuppressFinalize(this);
         }
 
         public async Task<bool> Exists(string key, CancellationToken token)
