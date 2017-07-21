@@ -53,12 +53,15 @@
     <Compile Include="BlobStorage.cs" />
     <Compile Include="Cache.cs" />
     <Compile Include="CacheHead.cs" />
+    <Compile Include="CaseInsensitiveKeyComparer.cs" />
     <Compile Include="ChunkTypes.cs" />
     <Compile Include="CityHash\CityHash.cs" />
     <Compile Include="CityHash\uint128.cs" />
     <Compile Include="ConcurrencyModes\AppDomainConcurrencyHandler.cs" />
     <Compile Include="ConcurrencyModes\ConcurrencyHandler.cs" />
     <Compile Include="ConcurrencyModes\SessionConcurrencyHandler.cs" />
+    <Compile Include="IKeyComparer.cs" />
+    <Compile Include="CaseSensitiveKeyComparer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="StorageChunk.cs" />
     <Compile Include="StorageInfo.cs" />

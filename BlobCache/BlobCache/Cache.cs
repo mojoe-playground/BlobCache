@@ -8,7 +8,6 @@
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
-    using CityHash;
     using ConcurrencyModes;
     using JetBrains.Annotations;
 
@@ -30,10 +29,21 @@
         {
         }
 
+        public Cache(string fileName, IKeyComparer keyComparer)
+            : this(new BlobStorage(fileName), keyComparer)
+        {
+        }
+
         public Cache(BlobStorage storage)
+            : this(storage, new CaseSensitiveKeyComparer())
+        {
+        }
+
+        public Cache(BlobStorage storage, IKeyComparer keyComparer)
         {
             Storage = storage;
             CleanupNeeded = Storage.IsInitialized;
+            KeyComparer = keyComparer ?? throw new ArgumentNullException(nameof(keyComparer));
         }
 
         [PublicAPI]
@@ -43,13 +53,15 @@
 
         private bool CleanupNeeded { get; }
 
+        private IKeyComparer KeyComparer { get; }
+
         private BlobStorage Storage { get; }
 
         public async Task Add(string key, DateTime timeToLive, byte[] data, CancellationToken token)
         {
             if (data == null)
                 throw new ArgumentNullException(nameof(data));
-            var hash = GetHash(key);
+            var hash = KeyComparer.GetHash(key);
 
             // Get old records, will be removed at the end
             var heads = await Heads(key, token);
@@ -192,7 +204,7 @@
 
         public async Task<bool> Get(string key, Stream target, CancellationToken token)
         {
-            var hash = GetHash(key);
+            var hash = KeyComparer.GetHash(key);
             var head = await ValidHead(key, token);
 
             if (string.IsNullOrEmpty(head.Key))
@@ -224,7 +236,7 @@
 
         public async Task<byte[]> Get(string key, CancellationToken token)
         {
-            var hash = GetHash(key);
+            var hash = KeyComparer.GetHash(key);
             var head = await ValidHead(key, token);
 
             if (string.IsNullOrEmpty(head.Key))
@@ -291,7 +303,7 @@
 
         public async Task<bool> Remove(string key, CancellationToken token)
         {
-            var hash = GetHash(key);
+            var hash = KeyComparer.GetHash(key);
             var heads = await Heads(key, token);
 
             if (heads.Count == 0)
@@ -319,18 +331,6 @@
             return true;
         }
 
-        private static uint GetHash(string key)
-        {
-            if (string.IsNullOrEmpty(key))
-                throw new ArgumentNullException(nameof(key));
-            return CityHash.CityHash32(key, Encoding.UTF8);
-        }
-
-        private static bool KeyEquals(string key1, string key2)
-        {
-            return string.Equals(key1, key2);
-        }
-
         private async Task<List<CacheHead>> Heads(string key, CancellationToken token)
         {
             if (key == null)
@@ -338,7 +338,7 @@
 
             var hash = 0u;
             if (!string.IsNullOrEmpty(key))
-                hash = GetHash(key);
+                hash = KeyComparer.GetHash(key);
 
             var res = new List<CacheHead>();
             var data = new List<StorageChunk>();
@@ -394,7 +394,7 @@
                         return _headCache[key].Heads.ToList();
 
                     // Filter all heads list for the given key
-                    return _headCache[string.Empty].Heads.Where(h => KeyEquals(key, h.Key)).ToList();
+                    return _headCache[string.Empty].Heads.Where(h => KeyComparer.SameKey(key, h.Key)).ToList();
                 }
 
             token.ThrowIfCancellationRequested();
@@ -406,10 +406,10 @@
                 {
                     var head = CacheHead.FromStream(r);
                     // If key given and not maching, ignore the header
-                    if (!string.IsNullOrEmpty(key) && !KeyEquals(key, head.Key))
+                    if (!string.IsNullOrEmpty(key) && !KeyComparer.SameKey(key, head.Key))
                         continue;
                     head.HeadChunk = h.Chunk;
-                    var headHash = GetHash(head.Key);
+                    var headHash = KeyComparer.GetHash(head.Key);
                     head.ValidChunks = head.Chunks.Where(c => data.Any(ch => ch.Id == c && ch.UserData == headHash)).Select(c => data.First(ch => ch.Id == c)).ToList();
                     res.Add(head);
                 }

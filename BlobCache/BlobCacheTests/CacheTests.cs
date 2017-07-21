@@ -11,12 +11,40 @@
     public class CacheTests
     {
         [Fact]
+        public async void KeyComparers()
+        {
+            Assert.Throws<ArgumentNullException>(() => new Cache("aa", null));
+
+            File.Delete("cache.blob");
+            using (var c = new Cache("cache.blob"))
+            {
+                Assert.True(await c.Initialize(CancellationToken.None));
+
+                await c.Add("xunit.core.xml", DateTime.MaxValue, File.ReadAllBytes("xunit.core.xml"), CancellationToken.None);
+                Assert.Equal(File.ReadAllBytes("xunit.core.xml"), await c.Get("xunit.core.xml", CancellationToken.None));
+                Assert.Null(await c.Get("XUNIT.CORE.xml", CancellationToken.None));
+            }
+
+            File.Delete("cache.blob");
+            using (var c = new Cache("cache.blob", new CaseInsensitiveKeyComparer()))
+            {
+                Assert.True(await c.Initialize(CancellationToken.None));
+
+                await c.Add("xunit.core.xml", DateTime.MaxValue, File.ReadAllBytes("xunit.core.xml"), CancellationToken.None);
+                Assert.Equal(File.ReadAllBytes("xunit.core.xml"), await c.Get("xunit.core.xml", CancellationToken.None));
+                Assert.Equal(File.ReadAllBytes("xunit.core.xml"), await c.Get("XUNIT.CORE.xml", CancellationToken.None));
+            }
+        }
+
+        [Fact]
         public async void Add()
         {
             File.Delete("cache.blob");
             using (var c = new Cache("cache.blob"))
             {
                 Assert.True(await c.Initialize(CancellationToken.None));
+
+                await Assert.ThrowsAsync<ArgumentNullException>(() => c.Add("xunit.core.xml", DateTime.MaxValue, null, CancellationToken.None));
 
                 await c.Add("xunit.core.xml", DateTime.MaxValue, File.ReadAllBytes("xunit.core.xml"), CancellationToken.None);
                 Assert.Equal(File.ReadAllBytes("xunit.core.xml"), await c.Get("xunit.core.xml", CancellationToken.None));
