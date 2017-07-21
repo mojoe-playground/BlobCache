@@ -55,6 +55,7 @@
         /// <param name="chunkType">Chunk type</param>
         /// <param name="userData">Chunk user data</param>
         /// <param name="data">bytes to add</param>
+        /// <param name="token">Cancellation token</param>
         /// <returns>StorageChunk of the added chunk</returns>
         public async Task<StorageChunk> AddChunk(int chunkType, uint userData, byte[] data, CancellationToken token)
         {
@@ -70,6 +71,7 @@
         /// <param name="chunkType">Chunk type</param>
         /// <param name="userData">Chunk user data</param>
         /// <param name="data">Stream to add</param>
+        /// <param name="token">Cancellation token</param>
         /// <returns>StorageChunk of the added chunk</returns>
         public Task<StorageChunk> AddChunk(int chunkType, uint userData, Stream data, CancellationToken token)
         {
@@ -82,12 +84,12 @@
 
                 var size = (uint)l;
 
-                StorageChunk free;
                 StorageChunk chunk;
 
                 using (var f = Open())
                 using (var w = new BinaryWriter(f, Encoding.UTF8))
                 {
+                    StorageChunk free;
                     using (WriteLock(ConcurrencyHandler.Timeout, token))
                     {
                         var info = ReadInfo();
@@ -223,7 +225,7 @@
                         WriteInfo(info);
                     }
                 }
-            });
+            }, token);
         }
 
         /// <summary>
@@ -297,6 +299,7 @@
         ///     Stream creator to create the output streams for the data, input: chunk read, output: stream
         ///     to use
         /// </param>
+        /// <param name="token">Cancellation token</param>
         /// <returns>List of chunk, Stream pairs in the order of the selector's result</returns>
         /// <remarks>
         ///     Chunks written to streams in the order of the selector's result, if multiple chunks are using the same stream
@@ -314,6 +317,7 @@
         ///     Selector to select which chunks need to be read to which stream, input: available storage info, output:
         ///     chunks to read with streams to read to
         /// </param>
+        /// <param name="token">Cancellation token</param>
         /// <returns>List of chunk, Stream pairs in the order of the selector's result</returns>
         /// <remarks>
         ///     Chunks written to streams in the order of the selector's result, if multiple chunks are using the same stream
@@ -337,6 +341,7 @@
         /// <param name="condition">
         ///     Condition to choose which chunks to read
         /// </param>
+        /// <param name="token">Cancellation token</param>
         /// <param name="streamCreator">
         ///     Stream creator to create the output streams for the data, input: chunk read, output: stream to use
         /// </param>
@@ -353,6 +358,7 @@
         ///     Selector to select which chunks need to be read to which stream, input: chunk read, output: stream to use (null
         ///     stream indicates not to read)
         /// </param>
+        /// <param name="token">Cancellation token</param>
         /// <returns>List of chunk, Stream pairs</returns>
         public async Task<IReadOnlyList<(StorageChunk Chunk, Stream Data)>> ReadChunks(Func<StorageChunk, Stream> selector, CancellationToken token)
         {
@@ -380,6 +386,7 @@
         ///     Selector to choose which chunks to read, input: storage info, chunk data version, output:
         ///     chunks to read
         /// </param>
+        /// <param name="token">Cancellation token</param>
         /// <returns>List of chunk, byte[] pairs in the order of the selector's result</returns>
         public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageInfo, IEnumerable<StorageChunk>> selector, CancellationToken token)
         {
@@ -392,6 +399,7 @@
         /// <param name="condition">
         ///     Condition to choose which chunks to read
         /// </param>
+        /// <param name="token">Cancellation token</param>
         /// <returns>List of chunk, byte[] pairs</returns>
         public async Task<IReadOnlyList<(StorageChunk Chunk, byte[] Data)>> ReadChunks(Func<StorageChunk, bool> condition, CancellationToken token)
         {
@@ -405,6 +413,7 @@
         ///     Selector to choose which chunk to remove, input: storage info, output:
         ///     chunk to remove (null to cancel)
         /// </param>
+        /// <param name="token">Cancellation token</param>
         /// <returns>Task</returns>
         public Task RemoveChunk(Func<StorageInfo, StorageChunk?> selector, CancellationToken token)
         {
@@ -497,7 +506,7 @@
 
                     break;
                 }
-            });
+            }, token);
         }
 
         public Task<StorageStatistics> Statistics(CancellationToken token)
@@ -519,7 +528,7 @@
                     FreeSpace = free.Sum(c => c.Size),
                     FileSize = Info.Length
                 };
-            });
+            }, token);
         }
 
         internal Task<IReadOnlyList<StorageChunk>> GetChunks(CancellationToken token)
@@ -530,7 +539,7 @@
                 {
                     return ReadInfo().Chunks;
                 }
-            });
+            }, token);
         }
 
         private void CheckBlobStorageHeader()
@@ -589,7 +598,7 @@
                 }
 
                 FreshlyInitialized = true;
-            });
+            }, token);
         }
 
         private void CreateEmptyBlobStorage()

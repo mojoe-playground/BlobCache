@@ -10,6 +10,7 @@
     using System.Threading.Tasks;
     using CityHash;
     using ConcurrencyModes;
+    using JetBrains.Annotations;
 
     public class Cache : IDisposable
     {
@@ -35,6 +36,7 @@
             CleanupNeeded = Storage.IsInitialized;
         }
 
+        [PublicAPI]
         public double CutBackRatio { get; set; } = 0.8;
 
         public long MaximumSize { get; set; }
@@ -175,7 +177,7 @@
 
                 // Cut excess space at the storage end again
                 await Storage.CutBackPadding(token);
-            });
+            }, token);
         }
 
         public void Dispose()

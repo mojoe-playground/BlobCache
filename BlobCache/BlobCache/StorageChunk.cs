@@ -6,7 +6,7 @@
 
     public struct StorageChunk : IEquatable<StorageChunk>
     {
-        public long Position { get; internal set; }
+        public long Position { get; }
         public uint Size { get; }
         public int Type { get; }
         public bool Changing { get; internal set; }
