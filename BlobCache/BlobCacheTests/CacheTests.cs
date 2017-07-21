@@ -52,6 +52,69 @@
         }
 
         [Fact]
+        public async void GetWithInfo()
+        {
+            File.Delete("cache.blob");
+            using (var c = new Cache("cache.blob"))
+            {
+                Assert.True(await c.Initialize(CancellationToken.None));
+                var r = await c.GetWithInfo("xunit.core.xml", CancellationToken.None);
+                Assert.Null(r.data);
+                Assert.Equal(default(CacheEntryInfo), r.info);
+
+                var now = DateTime.UtcNow;
+                await c.Add("xunit.core.xml", DateTime.MaxValue, File.ReadAllBytes("xunit.core.xml"), CancellationToken.None);
+                r = await c.GetWithInfo("xunit.core.xml", CancellationToken.None);
+                Assert.Equal(File.ReadAllBytes("xunit.core.xml"), r.data);
+                Assert.True(now < r.info.Added);
+
+                now = DateTime.UtcNow;
+                var data = new byte[0];
+                await c.Add("null.xml", DateTime.MaxValue, data, CancellationToken.None);
+                r = await c.GetWithInfo("null.xml", CancellationToken.None);
+                Assert.Equal(data, r.data);
+                Assert.True(now < r.info.Added);
+            }
+        }
+
+        [Fact]
+        public async void GetWithInfoStream()
+        {
+            File.Delete("cache.blob");
+            using (var c = new Cache("cache.blob"))
+            {
+                Assert.True(await c.Initialize(CancellationToken.None));
+                using (var ms = new MemoryStream())
+                {
+                    var r = await c.GetWithInfo("xunit.core.xml", ms, CancellationToken.None);
+                    Assert.False(r.success);
+                    Assert.Equal(default(CacheEntryInfo), r.info);
+                }
+
+                using (var ms = new MemoryStream())
+                {
+                    var now = DateTime.UtcNow;
+                    await c.Add("xunit.core.xml", DateTime.MaxValue, File.ReadAllBytes("xunit.core.xml"), CancellationToken.None);
+                    var r = await c.GetWithInfo("xunit.core.xml", ms, CancellationToken.None);
+                    Assert.True(r.success);
+                    Assert.Equal(File.ReadAllBytes("xunit.core.xml"), ms.ToArray());
+                    Assert.True(now < r.info.Added);
+                }
+
+                using (var ms = new MemoryStream())
+                {
+                    var now = DateTime.UtcNow;
+                    var data = new byte[0];
+                    await c.Add("null.xml", DateTime.MaxValue, data, CancellationToken.None);
+                    var r = await c.GetWithInfo("null.xml", ms, CancellationToken.None);
+                    Assert.True(r.success);
+                    Assert.Equal(data, ms.ToArray());
+                    Assert.True(now < r.info.Added);
+                }
+            }
+        }
+
+        [Fact]
         public async void AddStream()
         {
             File.Delete("cache.blob");

@@ -52,6 +52,7 @@
   <ItemGroup>
     <Compile Include="BlobStorage.cs" />
     <Compile Include="Cache.cs" />
+    <Compile Include="CacheEntryInfo.cs" />
     <Compile Include="CacheHead.cs" />
     <Compile Include="CaseInsensitiveKeyComparer.cs" />
     <Compile Include="ChunkTypes.cs" />

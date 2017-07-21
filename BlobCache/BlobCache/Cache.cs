@@ -39,16 +39,16 @@
         {
         }
 
-        ~Cache()
-        {
-            Dispose();
-        }
-
         public Cache(BlobStorage storage, IKeyComparer keyComparer)
         {
             Storage = storage;
             CleanupNeeded = Storage.IsInitialized;
             KeyComparer = keyComparer ?? throw new ArgumentNullException(nameof(keyComparer));
+        }
+
+        ~Cache()
+        {
+            Dispose();
         }
 
         [PublicAPI]
@@ -227,14 +227,26 @@
 
         public async Task<bool> Get(string key, Stream target, CancellationToken token)
         {
+            var res = await GetWithInfo(key, target, token);
+            return res.success;
+        }
+
+        public async Task<byte[]> Get(string key, CancellationToken token)
+        {
+            var res = await GetWithInfo(key, token);
+            return res.data;
+        }
+
+        public async Task<(bool success, CacheEntryInfo info)> GetWithInfo(string key, Stream target, CancellationToken token)
+        {
             var hash = KeyComparer.GetHash(key);
             var head = await ValidHead(key, token);
 
             if (string.IsNullOrEmpty(head.Key))
-                return false;
+                return (false, default(CacheEntryInfo));
 
             if (head.Length == 0)
-                return true;
+                return (true, InfoFromHead(head));
 
             var chunks = await Storage.ReadChunks(sc =>
             {
@@ -252,22 +264,22 @@
             }, token);
 
             if (chunks.Count == 0)
-                return false;
+                return (false, default(CacheEntryInfo));
 
-            return true;
+            return (true, InfoFromHead(head));
         }
 
-        public async Task<byte[]> Get(string key, CancellationToken token)
+        public async Task<(byte[] data, CacheEntryInfo info)> GetWithInfo(string key, CancellationToken token)
         {
             var hash = KeyComparer.GetHash(key);
             var head = await ValidHead(key, token);
 
             if (string.IsNullOrEmpty(head.Key))
-                return null;
+                return (null, default(CacheEntryInfo));
 
             var result = new byte[head.Length];
             if (head.Length == 0)
-                return result;
+                return (result, InfoFromHead(head));
 
             var position = 0;
 
@@ -287,7 +299,7 @@
             }, token);
 
             if (chunks.Count == 0)
-                return null;
+                return (null, default(CacheEntryInfo));
 
             foreach (var c in chunks)
             {
@@ -295,7 +307,7 @@
                 position += c.Data.Length;
             }
 
-            return result;
+            return (result, InfoFromHead(head));
         }
 
         public async Task<bool> Initialize(CancellationToken token)
@@ -352,6 +364,11 @@
             }
 
             return true;
+        }
+
+        private static CacheEntryInfo InfoFromHead(CacheHead head)
+        {
+            return new CacheEntryInfo { Added = head.HeadChunk.Added };
         }
 
         private async Task<List<CacheHead>> Heads(string key, CancellationToken token)
