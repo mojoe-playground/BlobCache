@@ -2,6 +2,7 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Text;
@@ -11,6 +12,8 @@
     /// </summary>
     public struct StorageInfo
     {
+        private List<StorageChunk> _chunkList;
+
         /// <summary>
         ///     Gets or sets a value indicating whether the storage is initialized
         /// </summary>
@@ -41,10 +44,100 @@
         public IReadOnlyList<StorageChunk> Chunks => ChunkList;
 
         /// <summary>
-        ///     Gets the chunks in storage
+        ///     Gets or sets the chunks in storage
         /// </summary>
         /// <remarks>When the structure used in selectors it is possible the list is filtered to valid chunks for the selector</remarks>
-        internal List<StorageChunk> ChunkList { get; set; }
+        private List<StorageChunk> ChunkList
+        {
+            get
+            {
+                if (_chunkList == null)
+                {
+                    _chunkList = new List<StorageChunk>();
+                    ChunkDictionary = new Dictionary<uint, int>();
+                }
+                return _chunkList;
+            }
+            set
+            {
+                var dict = new Dictionary<uint, int>();
+                for (var i = 0; i < value.Count; i++)
+                    dict[value[i].Id] = i;
+                _chunkList = value;
+                ChunkDictionary = dict;
+            }
+        }
+
+        /// <summary>
+        ///     Adds a new chunk to the chunk list
+        /// </summary>
+        /// <param name="chunk">Chunk to add</param>
+        internal void AddChunk(StorageChunk chunk)
+        {
+            ChunkList.Add(chunk);
+            ChunkDictionary[chunk.Id] = ChunkList.Count - 1;
+        }
+
+        /// <summary>
+        ///     REmoves a chunk from the chunk list
+        /// </summary>
+        /// <param name="chunk">Chunk to remove</param>
+        internal void RemoveChunk(StorageChunk chunk)
+        {
+            var index = ChunkDictionary[chunk.Id];
+            ChunkList.RemoveAt(index);
+
+            // Force recreation of ChunkDictionary
+            ChunkList = ChunkList;
+            //ChunkDictionary.Remove(chunk.Id);
+        }
+
+        /// <summary>
+        ///     Gets a chunk from the list by it's id
+        /// </summary>
+        /// <param name="id">Chunk id to search</param>
+        /// <returns>Chunk</returns>
+        internal StorageChunk GetChunkById(uint id)
+        {
+            var index = ChunkDictionary[id];
+            FailIndex(index);
+            return ChunkList[index];
+        }
+
+        /// <summary>
+        ///     Updates an existing chunk
+        /// </summary>
+        /// <param name="chunk">Chunk to update</param>
+        internal void UpdateChunk(StorageChunk chunk)
+        {
+            ReplaceChunk(chunk.Id, chunk);
+        }
+
+        /// <summary>
+        ///     Replaces a chunk with another one
+        /// </summary>
+        /// <param name="id">Chunk id to replace</param>
+        /// <param name="chunk">Replacement chunk</param>
+        internal void ReplaceChunk(uint id, StorageChunk chunk)
+        {
+            var index = ChunkDictionary[id];
+            FailIndex(index);
+            ChunkList[index] = chunk;
+            ChunkDictionary.Remove(id);
+            ChunkDictionary[chunk.Id] = index;
+        }
+
+        [Conditional("DEBUG")]
+        private void FailIndex(int index)
+        {
+            if (index < 0 || index>=ChunkList.Count && Debugger.IsAttached)
+                Debugger.Break();
+        }
+
+        /// <summary>
+        ///     Gets the chunks in storage
+        /// </summary>
+        private Dictionary<uint, int> ChunkDictionary { get; set; }
 
         /// <summary>
         ///     Reads the info from a stream
@@ -60,17 +153,17 @@
                 var rv = r.ReadUInt64();
                 var count = r.ReadInt32();
 
-                var list = new List<StorageChunk>();
-                for (var c = 0; c < count; c++)
-                    list.Add(StorageChunk.FromStream(r));
-
-                return new StorageInfo
+                var si = new StorageInfo
                 {
                     Initialized = i,
                     AddedVersion = av,
-                    RemovedVersion = rv,
-                    ChunkList = list
+                    RemovedVersion = rv
                 };
+
+                for (var c = 0; c < count; c++)
+                    si.AddChunk(StorageChunk.FromStream(r));
+
+                return si;
             }
         }
 
