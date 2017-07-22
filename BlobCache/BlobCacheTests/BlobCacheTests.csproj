@@ -59,6 +59,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="BlobStorageTests.cs" />
+    <Compile Include="CacheFileCheckTests.cs" />
     <Compile Include="CacheTests.cs" />
     <Compile Include="GlobalBlobStorageTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

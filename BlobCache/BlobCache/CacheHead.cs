@@ -36,5 +36,10 @@
 
             return new CacheHead { Key = k, TimeToLive = ttl, Chunks = list, Length = l };
         }
+
+        public override string ToString()
+        {
+            return $"{Key} ({TimeToLive}, {Length}) - {HeadChunk}";
+        }
     }
 }
