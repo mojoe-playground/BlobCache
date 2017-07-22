@@ -89,13 +89,12 @@
                 using (var f = await Open(token))
                 using (var w = new BinaryWriter(f, Encoding.UTF8))
                 {
-                    StorageChunk free;
                     using (WriteLock(ConcurrencyHandler.Timeout, token))
                     {
                         var info = ReadInfo();
 
                         // Check for exact size free chunk
-                        free = info.Chunks.FirstOrDefault(fc => !fc.Changing && fc.Size == size && fc.Type == ChunkTypes.Free);
+                        var free = info.Chunks.FirstOrDefault(fc => !fc.Changing && fc.Size == size && fc.Type == ChunkTypes.Free);
                         if (free.Type != ChunkTypes.Free)
                             // Check for free chunk bigger than required
                             free = info.Chunks.FirstOrDefault(fc => !fc.Changing && fc.Size > size + StorageChunk.ChunkHeaderSize && fc.Type == ChunkTypes.Free);
@@ -111,17 +110,21 @@
                                         size, DateTime.UtcNow)
                                     { Changing = true };
                                 info.ReplaceChunk(free.Id, chunk);
-                                free = default(StorageChunk);
                             }
                             else
                             {
                                 // chunk size < free space size, remove chunk sized portion of the free space
                                 var remaining = free.Size - size - StorageChunk.ChunkHeaderSize;
-                                free = new StorageChunk(free.Id, 0, ChunkTypes.Free, position + size + StorageChunk.ChunkHeaderSize, remaining, DateTime.UtcNow) { Changing = true };
+                                free = new StorageChunk(free.Id, 0, ChunkTypes.Free, position + size + StorageChunk.ChunkHeaderSize, remaining, DateTime.UtcNow);
                                 info.UpdateChunk(free);
                                 chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size, DateTime.UtcNow)
                                     { Changing = true };
                                 info.AddChunk(chunk);
+
+                                // write out new free chunk header
+                                f.Position = free.Position;
+                                free.ToStorage(w);
+                                f.Flush();
                             }
                         }
                         else
@@ -141,24 +144,16 @@
 
                     try
                     {
-                        // If splitting a free chunk write out new header before there is an opportunity to cancel
-                        if (free.Changing)
-                        {
-                            f.Position = free.Position;
-                            free.ToStorage(w);
-                        }
-                        await f.FlushAsync(CancellationToken.None);
-
                         // write chunk data to blob with FREE chunk type
                         f.Position = chunk.Position;
                         chunk.ToStorage(w, true);
                         await data.CopyToAsync(f, 81920, token);
-                        await f.FlushAsync(CancellationToken.None);
+                        f.Flush();
 
                         // write correct chunk type
                         f.Position = chunk.Position;
                         w.Write(chunk.Type);
-                        await f.FlushAsync(CancellationToken.None);
+                        f.Flush();
 
                         ok = true;
                     }
@@ -174,12 +169,6 @@
 
                             chunk.Changing = false;
                             info.UpdateChunk(chunk);
-
-                            if (free.Changing)
-                            {
-                                free.Changing = false;
-                                info.UpdateChunk(free);
-                            }
 
                             info.AddedVersion++;
                             WriteInfo(info);
