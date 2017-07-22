@@ -60,6 +60,9 @@
 
         public long MaximumSize { get; set; }
 
+        [PublicAPI]
+        public bool RemoveInvalidCache { get; set; }
+
         private bool CleanupNeeded { get; }
 
         private IKeyComparer KeyComparer { get; }
@@ -292,33 +295,39 @@
                 }
 
             var res = false;
-            //try
-            //{
-            res = await Storage.Initialize<SessionConcurrencyHandler>(token);
-            //}
-            //catch
-            //{
-            //    // if initialize failing the storage will be removed and initialization occures again
-            //}
 
-            //if (!res)
-            //{
-            //    try
-            //    {
-            //        Storage.Info.Delete();
-            //    }
-            //    catch (IOException)
-            //    {
-            //    }
-            //    catch (SecurityException)
-            //    {
-            //    }
-            //    catch (UnauthorizedAccessException)
-            //    {
-            //    }
+            if (!RemoveInvalidCache)
+                res = await Storage.Initialize<SessionConcurrencyHandler>(token);
+            else
+            {
+                try
+                {
+                    res = await Storage.Initialize<SessionConcurrencyHandler>(token);
+                }
+                catch
+                {
+                    // if initialize failing the storage will be removed and initialization occures again
+                }
 
-            //    res = await Storage.Initialize<SessionConcurrencyHandler>(token);
-            //}
+                if (!res)
+                {
+                    try
+                    {
+                        Storage.Info.Delete();
+                    }
+                    catch (IOException)
+                    {
+                    }
+                    catch (SecurityException)
+                    {
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                    }
+
+                    res = await Storage.Initialize<SessionConcurrencyHandler>(token);
+                }
+            }
 
             if (res && (CleanupNeeded || Storage.FreshlyInitialized))
                 await Cleanup(token);
