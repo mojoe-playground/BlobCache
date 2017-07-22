@@ -17,7 +17,7 @@
 
         public SessionConcurrencyHandler()
         {
-            Timeout = 5000;
+            Timeout = 15000;
         }
 
         protected bool IsGlobal { get; set; } = false;
