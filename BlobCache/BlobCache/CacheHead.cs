@@ -21,6 +21,7 @@
             writer.Write(Chunks.Count);
             foreach (var c in Chunks)
                 writer.Write(c);
+            writer.Flush();
         }
 
         public static CacheHead FromStream(BinaryReader reader)

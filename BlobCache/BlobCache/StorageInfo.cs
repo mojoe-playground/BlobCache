@@ -181,6 +181,7 @@
                 w.Write(Chunks.Count);
                 foreach (var c in Chunks)
                     c.ToStream(w);
+                w.Flush();
             }
         }
 

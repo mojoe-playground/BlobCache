@@ -621,6 +621,7 @@
                 w.Write(ChunkTypes.Blob);
                 w.Write(1);
                 w.Write(Guid.NewGuid().ToByteArray());
+                w.Flush();
             }
         }
 

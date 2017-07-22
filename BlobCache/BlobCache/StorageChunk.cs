@@ -68,6 +68,7 @@
             writer.Write(UserData);
             writer.Write(Size);
             writer.Write(Added.Ticks);
+            writer.Flush();
         }
 
         internal void ToStream(BinaryWriter writer)
@@ -78,6 +79,7 @@
             writer.Write(UserData);
             writer.Write(Size);
             writer.Write(Added.Ticks);
+            writer.Flush();
         }
 
         public bool Equals(StorageChunk other)
