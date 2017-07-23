@@ -1,4 +1,6 @@
-﻿namespace BlobCache
+﻿
+#define InvalidChunkDebug
+namespace BlobCache
 {
     using System;
     using System.Collections.Generic;
@@ -115,13 +117,21 @@
                                 // chunk size < free space size, remove chunk sized portion of the free space
                                 free = new StorageChunk(free.Id, 0, ChunkTypes.Free, free.Position + size + StorageChunk.ChunkHeaderSize, free.Size - size - StorageChunk.ChunkHeaderSize, DateTime.UtcNow);
                                 info.UpdateChunk(free);
-                                chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, free.Position, size, DateTime.UtcNow)
-                                    { Changing = true };
+                                chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, free.Position, size, DateTime.UtcNow) { Changing = true };
                                 info.AddChunk(chunk);
 
                                 // write out new free chunk header
                                 f.Position = free.Position;
                                 free.ToStorage(w);
+
+#if InvalidChunkDebug
+                                if (free.Size > 0)
+                                {
+                                    f.Position = free.Position + StorageChunk.ChunkHeaderSize + free.Size - 1;
+                                    f.WriteByte(83); // 'S' character
+                                }
+#endif
+
                                 f.Flush();
                             }
                         }
@@ -502,6 +512,15 @@
                         // Mark the chunk free
                         f.Position = chunk.Position;
                         chunk.ToStorage(w);
+
+#if InvalidChunkDebug
+                        if (chunk.Size > 0)
+                        {
+                            f.Position = chunk.Position + StorageChunk.ChunkHeaderSize + chunk.Size - 1;
+                            f.WriteByte(82); // 'R' character
+                        }
+#endif
+
                         f.Flush();
 
                         // Mark the chunk changing while updating the file
@@ -542,7 +561,7 @@
         }
 
         /// <summary>
-        /// Gets the chunks in the storage
+        ///     Gets the chunks in the storage
         /// </summary>
         /// <param name="token">Cancellation token</param>
         /// <returns>List of chunks in the storage</returns>
@@ -645,6 +664,11 @@
                     id++;
 
             return id;
+        }
+
+        private IDisposable Lock(int timeout, CancellationToken token)
+        {
+            return ConcurrencyHandler.Lock(timeout, token);
         }
 
         private async Task<FileStream> Open(CancellationToken token)
@@ -757,11 +781,6 @@
         private void WriteInfo(StorageInfo info)
         {
             ConcurrencyHandler.WriteInfo(info);
-        }
-
-        private IDisposable Lock(int timeout, CancellationToken token)
-        {
-            return ConcurrencyHandler.Lock(timeout, token);
         }
     }
 }
