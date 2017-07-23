@@ -63,6 +63,9 @@
         [PublicAPI]
         public bool RemoveInvalidCache { get; set; }
 
+        [PublicAPI]
+        public bool CleanupAtInitialize { get; set; } = true;
+
         private bool CleanupNeeded { get; }
 
         private IKeyComparer KeyComparer { get; }
@@ -329,7 +332,7 @@
                 }
             }
 
-            if (res && (CleanupNeeded || Storage.FreshlyInitialized))
+            if (res && (CleanupNeeded || Storage.FreshlyInitialized) && CleanupAtInitialize)
                 await Cleanup(token);
 
             return res;
