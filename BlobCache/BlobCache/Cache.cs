@@ -234,11 +234,10 @@
                 var goodData = goodHeaders.SelectMany(d => d.ValidChunks.Select(c => c.Id)).Distinct().ToDictionary(id => id);
 
                 var oldDataCutoff = now.AddDays(-1);
-                var chunks = await Storage.GetChunks(token);
 
                 // Remove data chunks not belonging to good headers and added more than a day ago
-                foreach (var c in chunks.Where(ch => ch.Type == ChunkTypes.Data && ch.Added < oldDataCutoff && !goodData.ContainsKey(ch.Id) && !ch.Changing).ToList())
-                    await Storage.RemoveChunk(sc => sc.Chunks.FirstOrDefault(ch => ch.Id == c.Id && ch.Type == c.Type && ch.Position == c.Position && ch.Size == c.Size && ch.UserData == c.UserData), token);
+                while (await Storage.RemoveChunk(si => si.Chunks.FirstOrDefault(ch => ch.Type == ChunkTypes.Data && ch.Added < oldDataCutoff && !goodData.ContainsKey(ch.Id)), token))
+                { }
 
                 // Cut excess space at the storage end
                 await Storage.CutBackPadding(token);
