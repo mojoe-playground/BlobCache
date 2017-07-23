@@ -158,7 +158,17 @@ namespace BlobCache
                     try
                     {
                         // write chunk data to stream
-                        await data.CopyToAsync(f, 81920, token);
+                        byte[] buffer = new byte[81920];
+                        long remaining = size;
+                        while (remaining > 0)
+                        {
+                            var bytesRead = await data.ReadAsync(buffer, 0, (int)Math.Min(remaining, buffer.Length), token).ConfigureAwait(false);
+                            if (bytesRead != 0)
+                                await f.WriteAsync(buffer, 0, bytesRead, token).ConfigureAwait(false);
+                            else
+                                break;
+                            remaining -= bytesRead;
+                        }
                         f.Flush();
 
                         // write correct chunk type

@@ -20,6 +20,7 @@
         //private const string CacheToTest = @"c:\Users\mojoe.Home\AppData\Local\VideoPlayer\cache-TheMovieDBData.blob";
         private const string CacheToTest = "CacheTest.blob";
         //private const string CacheToTest = @"c:\Users\mojoe.Home\AppData\Local\VideoPlayer\cache-ImageLod.blob.invalid";
+        //private const string CacheToTest = @"c:\Users\mojoe.Home\AppData\Local\VideoPlayer\cache-FaceData.blob.invalid";
 
         private static readonly IKeyComparer KeyComparer = new CaseSensitiveKeyComparer();
         private readonly double CutBackRatio = 0.8;
