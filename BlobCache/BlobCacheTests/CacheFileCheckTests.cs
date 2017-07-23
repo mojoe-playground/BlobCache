@@ -17,6 +17,7 @@
     {
         //private const string CacheToTest = @"c:\Users\mojoe.Home\AppData\Local\VideoPlayer\cache-ReferencedItem.blob";
         //private const string CacheToTest = @"c:\Users\mojoe.Home\AppData\Local\VideoPlayer\cache-StringData.blob";
+        //private const string CacheToTest = @"c:\Users\mojoe.Home\AppData\Local\VideoPlayer\cache-TheMovieDBData.blob";
         private const string CacheToTest = "CacheTest.blob";
 
         private static readonly IKeyComparer KeyComparer = new CaseSensitiveKeyComparer();
@@ -35,6 +36,24 @@
         }
 
         private ITestOutputHelper Output { get; }
+
+        [Fact]
+        public async Task Statistics()
+        {
+            using (var c = new Cache(CacheToTest))
+            {
+                Assert.True(await c.Initialize(CancellationToken.None));
+                var s = await c.Statistics(CancellationToken.None);
+                Output.WriteLine("CompressionRatio: {0:P}", s.CompressionRatio);
+                Output.WriteLine("EntriesSize: {0}", s.EntriesSize);
+                Output.WriteLine("FileSize: {0}", s.FileSize);
+                Output.WriteLine("FreeSpace: {0}", s.FreeSpace);
+                Output.WriteLine("NumberOfEntries: {0}", s.NumberOfEntries);
+                Output.WriteLine("Overhead: {0}", s.Overhead);
+                Output.WriteLine("StorageRatio: {0:P}", s.StorageRatio);
+                Output.WriteLine("UsedSpace: {0}", s.UsedSpace);
+            }
+        }
 
         [Fact]
         public async Task CleanupDryRun()
