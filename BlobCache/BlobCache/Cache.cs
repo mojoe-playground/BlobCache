@@ -476,7 +476,7 @@
             var heads = await Heads(null, token);
             var storageStatistics = await Storage.Statistics(token);
 
-            return new CacheStatistics { FileSize = storageStatistics.FileSize, UsedSpace = storageStatistics.UsedSpace + storageStatistics.Overhead, FreeSpace = storageStatistics.FreeSpace, Overhead = storageStatistics.Overhead + heads.Sum(h => h.HeadChunk.Size) + heads.Sum(h => h.ValidChunks.Count * DataHead.DataHeadSize), CompressionRatio = 1.0 - heads.Average(h => h.ValidChunks.Sum(c => c.Size - DataHead.DataHeadSize) / (double)h.Length), EntriesSize = heads.Sum(h => h.Length), NumberOfEntries = heads.Count, StorageRatio = heads.Average(h=>(h.HeadChunk.Size + StorageChunk.ChunkHeaderSize + h.ValidChunks.Sum(c=>c.Size + StorageChunk.ChunkHeaderSize)) / (double)h.Length)  };
+            return new CacheStatistics { FileSize = storageStatistics.FileSize, UsedSpace = storageStatistics.UsedSpace + storageStatistics.Overhead, FreeSpace = storageStatistics.FreeSpace, Overhead = storageStatistics.Overhead + heads.Sum(h => h.HeadChunk.Size) + heads.Sum(h => h.ValidChunks.Count * DataHead.DataHeadSize), CompressionRatio = heads.Count == 0 ? 0 : heads.Average(h => h.ValidChunks.Sum(c => c.Size - DataHead.DataHeadSize) / (double)h.Length), EntriesSize = heads.Sum(h => h.Length), NumberOfEntries = heads.Count, StorageRatio = heads.Count == 0 ? 0 : heads.Average(h => (h.HeadChunk.Size + StorageChunk.ChunkHeaderSize + h.ValidChunks.Sum(c => c.Size + StorageChunk.ChunkHeaderSize)) / (double)h.Length) };
         }
 
         private static byte[] Decode(byte[] data)
