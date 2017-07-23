@@ -407,7 +407,9 @@
                 {
                     try
                     {
-                        Storage.Info.Delete();
+                        File.Delete(Storage.Info.FullName + ".invalid");
+                        File.Move(Storage.Info.FullName, Storage.Info.FullName + ".invalid");
+                        //Storage.Info.Delete();
                     }
                     catch (IOException)
                     {
