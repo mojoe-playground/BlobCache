@@ -25,21 +25,39 @@
         private ulong _headCacheAddedVersion;
         private ulong _headCacheRemovedVersion;
 
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="Cache" /> class
+        /// </summary>
+        /// <param name="fileName">Storage file name</param>
         public Cache(string fileName)
             : this(new BlobStorage(fileName))
         {
         }
 
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="Cache" /> class
+        /// </summary>
+        /// <param name="fileName">Storage file name</param>
+        /// <param name="keyComparer">Key comparer to use</param>
         public Cache(string fileName, IKeyComparer keyComparer)
             : this(new BlobStorage(fileName), keyComparer)
         {
         }
 
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="Cache" /> class
+        /// </summary>
+        /// <param name="storage">Storage to use</param>
         public Cache(BlobStorage storage)
             : this(storage, new CaseSensitiveKeyComparer())
         {
         }
 
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="Cache" /> class
+        /// </summary>
+        /// <param name="storage">Storage to use</param>
+        /// <param name="keyComparer">Key comparer to use</param>
         public Cache(BlobStorage storage, IKeyComparer keyComparer)
         {
             Storage = storage;
@@ -52,19 +70,34 @@
             Dispose();
         }
 
+        /// <summary>
+        ///     Gets or sets a value indicating whether cache data can be compressed
+        /// </summary>
         [PublicAPI]
         public bool CanCompress { get; set; }
 
+        /// <summary>
+        ///     Gets or sets a value indicating whether cache should be clean up at initialization
+        /// </summary>
+        [PublicAPI]
+        public bool CleanupAtInitialize { get; set; } = true;
+
+        /// <summary>
+        ///     Gets or sets the ratio used when removing records from the storage beacuse maximum file size is over the limit
+        /// </summary>
         [PublicAPI]
         public double CutBackRatio { get; set; } = 0.8;
 
+        /// <summary>
+        ///     Gets or sets the maximum file size
+        /// </summary>
         public long MaximumSize { get; set; }
 
+        /// <summary>
+        ///     Gets or sets a value indicating whether remove invalid caches if an error occures at initialization
+        /// </summary>
         [PublicAPI]
         public bool RemoveInvalidCache { get; set; }
-
-        [PublicAPI]
-        public bool CleanupAtInitialize { get; set; } = true;
 
         private bool CleanupNeeded { get; }
 
@@ -72,6 +105,14 @@
 
         private BlobStorage Storage { get; }
 
+        /// <summary>
+        ///     Adds an entry to the cache
+        /// </summary>
+        /// <param name="key">Entry key</param>
+        /// <param name="timeToLive">time to live of the data</param>
+        /// <param name="data">Data to cache</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Task</returns>
         public async Task Add(string key, DateTime timeToLive, byte[] data, CancellationToken token)
         {
             if (data == null)
@@ -83,6 +124,14 @@
             }
         }
 
+        /// <summary>
+        ///     Adds an entry to the cache
+        /// </summary>
+        /// <param name="key">Entry key</param>
+        /// <param name="timeToLive">time to live of the data</param>
+        /// <param name="data">Data to cache</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Task</returns>
         public async Task Add(string key, DateTime timeToLive, Stream data, CancellationToken token)
         {
             if (data == null)
@@ -227,29 +276,58 @@
             }, token);
         }
 
+        /// <summary>
+        ///     Disposes used resources
+        /// </summary>
         public void Dispose()
         {
             Storage?.Dispose();
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>
+        ///     Checks whether a key exists in the cache
+        /// </summary>
+        /// <param name="key">Key to check</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>True if an entry exists with the key</returns>
         public async Task<bool> Exists(string key, CancellationToken token)
         {
             return !string.IsNullOrEmpty((await ValidHead(key, token)).Key);
         }
 
+        /// <summary>
+        ///     Gets an entry from the cache
+        /// </summary>
+        /// <param name="key">Entry key to get</param>
+        /// <param name="target">Target stream to write the entry</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>True if found</returns>
         public async Task<bool> Get(string key, Stream target, CancellationToken token)
         {
             var res = await GetWithInfo(key, target, token);
             return res.success;
         }
 
+        /// <summary>
+        ///     Gets an entry from the cache
+        /// </summary>
+        /// <param name="key">Entry key to get</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Entry data, null if not found</returns>
         public async Task<byte[]> Get(string key, CancellationToken token)
         {
             var res = await GetWithInfo(key, token);
             return res.data;
         }
 
+        /// <summary>
+        ///     Gets an entry from the cache with extra information
+        /// </summary>
+        /// <param name="key">Entry key to get</param>
+        /// <param name="target">Target stream to write the entry</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Indicator whether entry found and information about the entry</returns>
         public async Task<(bool success, CacheEntryInfo info)> GetWithInfo(string key, Stream target, CancellationToken token)
         {
             var success = false;
@@ -261,6 +339,12 @@
             return (success, info);
         }
 
+        /// <summary>
+        ///     Gets an entry from the cache with extra information
+        /// </summary>
+        /// <param name="key">Entry key to get</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Entry data, or null if not found and information about the entry</returns>
         public async Task<(byte[] data, CacheEntryInfo info)> GetWithInfo(string key, CancellationToken token)
         {
             byte[] result = null;
@@ -279,6 +363,11 @@
             return (result, info);
         }
 
+        /// <summary>
+        ///     Initializes the cache
+        /// </summary>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>True if initialization successfull</returns>
         public async Task<bool> Initialize(CancellationToken token)
         {
             // If storage size exceeds two times the maximum size try to delete the cache and start over
@@ -300,7 +389,9 @@
             var res = false;
 
             if (!RemoveInvalidCache)
+            {
                 res = await Storage.Initialize<SessionConcurrencyHandler>(token);
+            }
             else
             {
                 try
@@ -338,6 +429,12 @@
             return res;
         }
 
+        /// <summary>
+        ///     Remove an entry from the cache
+        /// </summary>
+        /// <param name="key">Entry key to remove</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>True if remove successfull</returns>
         public async Task<bool> Remove(string key, CancellationToken token)
         {
             var hash = KeyComparer.GetHash(key);
