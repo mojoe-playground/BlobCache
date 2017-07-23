@@ -101,12 +101,11 @@
 
                         if (free.Type == ChunkTypes.Free)
                         {
-                            var position = free.Position;
                             // if free space found in blob
                             if (free.Size == size)
                             {
                                 // if chunk size equals with the free space size, replace free space with chunk
-                                chunk = new StorageChunk(free.Id, userData, chunkType, position,
+                                chunk = new StorageChunk(free.Id, userData, chunkType, free.Position,
                                         size, DateTime.UtcNow)
                                     { Changing = true };
                                 info.ReplaceChunk(free.Id, chunk);
@@ -114,10 +113,9 @@
                             else
                             {
                                 // chunk size < free space size, remove chunk sized portion of the free space
-                                var remaining = free.Size - size - StorageChunk.ChunkHeaderSize;
-                                free = new StorageChunk(free.Id, 0, ChunkTypes.Free, position + size + StorageChunk.ChunkHeaderSize, remaining, DateTime.UtcNow);
+                                free = new StorageChunk(free.Id, 0, ChunkTypes.Free, free.Position + size + StorageChunk.ChunkHeaderSize, free.Size - size - StorageChunk.ChunkHeaderSize, DateTime.UtcNow);
                                 info.UpdateChunk(free);
-                                chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size, DateTime.UtcNow)
+                                chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, free.Position, size, DateTime.UtcNow)
                                     { Changing = true };
                                 info.AddChunk(chunk);
 
@@ -138,15 +136,18 @@
                         }
 
                         WriteInfo(info);
+
+                        // write chunk data to blob with FREE chunk type
+                        f.Position = chunk.Position;
+                        chunk.ToStorage(w, true);
+                        f.Flush();
                     }
 
                     var ok = false;
 
                     try
                     {
-                        // write chunk data to blob with FREE chunk type
-                        f.Position = chunk.Position;
-                        chunk.ToStorage(w, true);
+                        // write chunk data to stream
                         await data.CopyToAsync(f, 81920, token);
                         f.Flush();
 
@@ -253,6 +254,7 @@
                     _mainLock?.Close();
                     _mainLock = null;
 
+                    Info.Refresh();
                     if (!Info.Exists)
                         CreateEmptyBlobStorage();
 

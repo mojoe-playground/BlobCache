@@ -19,6 +19,7 @@
         //private const string CacheToTest = @"c:\Users\mojoe.Home\AppData\Local\VideoPlayer\cache-StringData.blob";
         //private const string CacheToTest = @"c:\Users\mojoe.Home\AppData\Local\VideoPlayer\cache-TheMovieDBData.blob";
         private const string CacheToTest = "CacheTest.blob";
+        //private const string CacheToTest = @"c:\Users\mojoe.Home\AppData\Local\VideoPlayer\cache-ImageLod.blob.invalid";
 
         private static readonly IKeyComparer KeyComparer = new CaseSensitiveKeyComparer();
         private readonly double CutBackRatio = 0.8;
@@ -40,7 +41,7 @@
         [Fact]
         public async Task Statistics()
         {
-            using (var c = new Cache(CacheToTest))
+            using (var c = new Cache(CacheToTest) { RemoveInvalidCache = false, CleanupAtInitialize = false })
             {
                 Assert.True(await c.Initialize(CancellationToken.None));
                 var s = await c.Statistics(CancellationToken.None);
