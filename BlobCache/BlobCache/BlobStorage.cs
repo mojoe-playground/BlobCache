@@ -89,7 +89,7 @@
                 using (var f = await Open(token))
                 using (var w = new BinaryWriter(f, Encoding.UTF8))
                 {
-                    using (WriteLock(ConcurrencyHandler.Timeout, token))
+                    using (Lock(ConcurrencyHandler.Timeout, token))
                     {
                         var info = ReadInfo();
 
@@ -159,7 +159,7 @@
                     }
                     finally
                     {
-                        using (WriteLock(ConcurrencyHandler.Timeout, CancellationToken.None))
+                        using (Lock(ConcurrencyHandler.Timeout, CancellationToken.None))
                         {
                             var info = ReadInfo();
 
@@ -189,7 +189,7 @@
             {
                 using (var f = await Open(token))
                 {
-                    using (WriteLock(ConcurrencyHandler.Timeout, token))
+                    using (Lock(ConcurrencyHandler.Timeout, token))
                     {
                         var info = ReadInfo();
 
@@ -436,8 +436,8 @@
         ///     chunk to remove (null to cancel)
         /// </param>
         /// <param name="token">Cancellation token</param>
-        /// <returns>Task</returns>
-        public Task RemoveChunk(Func<StorageInfo, StorageChunk?> selector, CancellationToken token)
+        /// <returns>True if a chunk removed</returns>
+        public Task<bool> RemoveChunk(Func<StorageInfo, StorageChunk?> selector, CancellationToken token)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
@@ -454,14 +454,14 @@
 
                     using (var f = await Open(token))
                     using (var w = new BinaryWriter(f, Encoding.UTF8))
-                    using (WriteLock(ConcurrencyHandler.Timeout, token))
+                    using (Lock(ConcurrencyHandler.Timeout, token))
                     {
                         var info = ReadInfo();
 
                         // Get the chunk to delete
                         var item = selector.Invoke(info.FilterChunks(c => c.Type != ChunkTypes.Free && !c.Changing));
                         if (item == null || item.Value == default(StorageChunk))
-                            return;
+                            return false;
 
                         var chunk = item.Value;
 
@@ -512,6 +512,8 @@
 
                     break;
                 }
+
+                return true;
             }, token);
         }
 
@@ -537,11 +539,17 @@
             }, token);
         }
 
+        /// <summary>
+        /// Gets the chunks in the storage
+        /// </summary>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>List of chunks in the storage</returns>
+        /// <remarks>Information purposes only, chunks can change in another thread / process</remarks>
         internal Task<IReadOnlyList<StorageChunk>> GetChunks(CancellationToken token)
         {
             return Task.Run(() =>
             {
-                using (ReadLock(ConcurrencyHandler.Timeout, token))
+                using (Lock(ConcurrencyHandler.Timeout, token))
                 {
                     return ReadInfo().Chunks;
                 }
@@ -573,7 +581,7 @@
         {
             return Task.Run(() =>
             {
-                using (WriteLock(ConcurrencyHandler.Timeout, token))
+                using (Lock(ConcurrencyHandler.Timeout, token))
                 {
                     var info = ReadInfo();
 
@@ -682,7 +690,7 @@
             {
                 List<StorageChunk> chunksToRead;
 
-                using (WriteLock(ConcurrencyHandler.Timeout, token))
+                using (Lock(ConcurrencyHandler.Timeout, token))
                 {
                     var info = ReadInfo();
 
@@ -718,7 +726,7 @@
                 }
                 finally
                 {
-                    using (WriteLock(ConcurrencyHandler.Timeout, CancellationToken.None))
+                    using (Lock(ConcurrencyHandler.Timeout, CancellationToken.None))
                     {
                         var info = ReadInfo();
 
@@ -744,19 +752,14 @@
             return ConcurrencyHandler.ReadInfo();
         }
 
-        private IDisposable ReadLock(int timeout, CancellationToken token)
-        {
-            return ConcurrencyHandler.ReadLock(timeout, token);
-        }
-
         private void WriteInfo(StorageInfo info)
         {
             ConcurrencyHandler.WriteInfo(info);
         }
 
-        private IDisposable WriteLock(int timeout, CancellationToken token)
+        private IDisposable Lock(int timeout, CancellationToken token)
         {
-            return ConcurrencyHandler.WriteLock(timeout, token);
+            return ConcurrencyHandler.Lock(timeout, token);
         }
     }
 }

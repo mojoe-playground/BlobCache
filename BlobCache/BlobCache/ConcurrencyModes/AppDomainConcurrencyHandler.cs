@@ -11,18 +11,6 @@
             return LocalSyncData.ReadInfo(Id);
         }
 
-        public override IDisposable ReadLock(int timeout, CancellationToken token)
-        {
-            var l = LocalSyncData.ReadWriteLock(Id);
-
-            if (timeout < 0)
-                l.EnterReadLock();
-            else if (!l.TryEnterReadLock(TimeSpan.FromMilliseconds(timeout)))
-                throw new TimeoutException();
-
-            return new LockRelease(l, true);
-        }
-
         public override void SignalReadFinish()
         {
             LocalSyncData.Signal(Id).Set();
@@ -43,16 +31,21 @@
             LocalSyncData.WriteInfo(Id, info);
         }
 
-        public override IDisposable WriteLock(int timeout, CancellationToken token)
+        public override IDisposable Lock(int timeout, CancellationToken token)
         {
-            var l = LocalSyncData.ReadWriteLock(Id);
+            var l = LocalSyncData.LockObject(Id);
 
             if (timeout < 0)
-                l.EnterWriteLock();
-            else if (!l.TryEnterWriteLock(TimeSpan.FromMilliseconds(timeout)))
-                throw new TimeoutException();
+                Monitor.Enter(l);
+            else
+            {
+                bool lockTaken = false;
+                Monitor.TryEnter(l, timeout, ref lockTaken);
+            if (!lockTaken)
+                    throw new TimeoutException();
+            }
 
-            return new LockRelease(l, false);
+            return new LockRelease(l);
         }
 
         protected override void Dispose(bool disposing)
@@ -62,7 +55,7 @@
 
         private static class LocalSyncData
         {
-            private static readonly Dictionary<Guid, (int UsedLockCount, StorageInfo Info, ReaderWriterLockSlim ReadWriteLock, ManualResetEventSlim ManualReset)> Data = new Dictionary<Guid, (int, StorageInfo, ReaderWriterLockSlim, ManualResetEventSlim)>();
+            private static readonly Dictionary<Guid, (int UsedLockCount, StorageInfo Info, object Lock, ManualResetEventSlim ManualReset)> Data = new Dictionary<Guid, (int, StorageInfo, object, ManualResetEventSlim)>();
 
             public static StorageInfo ReadInfo(Guid id)
             {
@@ -74,15 +67,15 @@
                 return default(StorageInfo);
             }
 
-            public static ReaderWriterLockSlim ReadWriteLock(Guid id)
+            public static object LockObject(Guid id)
             {
-                ReaderWriterLockSlim locker;
+                object locker;
                 lock (Data)
                 {
                     if (!Data.ContainsKey(id))
-                        Data[id] = (0, default(StorageInfo), new ReaderWriterLockSlim(), new ManualResetEventSlim());
+                        Data[id] = (0, default(StorageInfo), new object(), new ManualResetEventSlim());
 
-                    locker = Data[id].ReadWriteLock;
+                    locker = Data[id].Lock;
                 }
 
                 return locker;
@@ -102,7 +95,7 @@
                 lock (Data)
                 {
                     if (!Data.ContainsKey(id))
-                        Data[id] = (0, default(StorageInfo), new ReaderWriterLockSlim(), new ManualResetEventSlim());
+                        Data[id] = (0, default(StorageInfo), new object(), new ManualResetEventSlim());
 
                     locker = Data[id].ManualReset;
                 }
@@ -116,12 +109,12 @@
                 {
                     if (!Data.ContainsKey(id))
                     {
-                        Data[id] = (0, info, new ReaderWriterLockSlim(), new ManualResetEventSlim());
+                        Data[id] = (0, info, new object(), new ManualResetEventSlim());
                     }
                     else
                     {
                         var r = Data[id];
-                        Data[id] = (r.UsedLockCount, info, r.ReadWriteLock, r.ManualReset);
+                        Data[id] = (r.UsedLockCount, info, r.Lock, r.ManualReset);
                     }
                 }
             }
@@ -129,21 +122,16 @@
 
         private class LockRelease : IDisposable
         {
-            private readonly ReaderWriterLockSlim _lock;
-            private readonly bool _read;
+            private readonly object _lock;
 
-            public LockRelease(ReaderWriterLockSlim locker, bool read)
+            public LockRelease(object locker)
             {
                 _lock = locker;
-                _read = read;
             }
 
             public void Dispose()
             {
-                if (_read)
-                    _lock.ExitReadLock();
-                else
-                    _lock.ExitWriteLock();
+                Monitor.Exit(_lock);
             }
         }
     }

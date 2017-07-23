@@ -19,8 +19,6 @@
 
         public abstract StorageInfo ReadInfo();
 
-        public abstract IDisposable ReadLock(int timeout, CancellationToken token);
-
         // Should set manual signal
         public abstract void SignalReadFinish();
 
@@ -32,7 +30,7 @@
 
         public abstract void WriteInfo(StorageInfo info);
 
-        public abstract IDisposable WriteLock(int timeout, CancellationToken token);
+        public abstract IDisposable Lock(int timeout, CancellationToken token);
 
         protected virtual void Dispose(bool disposing)
         {
