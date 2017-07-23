@@ -488,7 +488,7 @@
 
                         // Check previous chunk is free, combine free space
                         var pos = chunk.Position;
-                        var previousChunk = info.Chunks.Where(c => c.Position < pos).OrderByDescending(c => c.Position).FirstOrDefault();
+                        var previousChunk = info.Chunks.FirstOrDefault(c => c.Position + c.Size + StorageChunk.ChunkHeaderSize == pos);
 
                         if (previousChunk.Type == ChunkTypes.Free && !previousChunk.Changing)
                         {
