@@ -529,7 +529,7 @@
 
                 return new StorageStatistics
                 {
-                    Overhead = chunks.Count * StorageChunk.ChunkHeaderSize,
+                    Overhead = chunks.Count * StorageChunk.ChunkHeaderSize + HeaderSize,
                     UsedChunks = used.Count,
                     UsedSpace = used.Sum(c => c.Size),
                     FreeChunks = free.Count,

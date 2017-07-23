@@ -54,6 +54,7 @@
     <Compile Include="Cache.cs" />
     <Compile Include="CacheEntryInfo.cs" />
     <Compile Include="CacheHead.cs" />
+    <Compile Include="CacheStatistics.cs" />
     <Compile Include="CaseInsensitiveKeyComparer.cs" />
     <Compile Include="ChunkTypes.cs" />
     <Compile Include="CityHash\CityHash.cs" />

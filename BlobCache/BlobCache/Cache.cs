@@ -237,7 +237,8 @@
 
                 // Remove data chunks not belonging to good headers and added more than a day ago
                 while (await Storage.RemoveChunk(si => si.Chunks.FirstOrDefault(ch => ch.Type == ChunkTypes.Data && ch.Added < oldDataCutoff && !goodData.ContainsKey(ch.Id)), token))
-                { }
+                {
+                }
 
                 // Cut excess space at the storage end
                 await Storage.CutBackPadding(token);
@@ -462,6 +463,20 @@
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Gets statistics from the cache
+        /// </summary>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Cache statistics</returns>
+        [PublicAPI]
+        public async Task<CacheStatistics> Statistics(CancellationToken token)
+        {
+            var heads = await Heads(null, token);
+            var storageStatistics = await Storage.Statistics(token);
+
+            return new CacheStatistics { FileSize = storageStatistics.FileSize, UsedSpace = storageStatistics.UsedSpace + storageStatistics.Overhead, FreeSpace = storageStatistics.FreeSpace, Overhead = storageStatistics.Overhead + heads.Sum(h => h.HeadChunk.Size) + heads.Sum(h => h.ValidChunks.Count * DataHead.DataHeadSize), CompressionRatio = 1.0 - heads.Average(h => h.ValidChunks.Sum(c => c.Size - DataHead.DataHeadSize) / h.Length), EntriesSize = heads.Sum(h => h.Length), NumberOfEntries = heads.Count, StorageRatio = heads.Average(h=>(h.HeadChunk.Size + StorageChunk.ChunkHeaderSize + h.ValidChunks.Sum(c=>c.Size + StorageChunk.ChunkHeaderSize)) / h.Length)  };
         }
 
         private static byte[] Decode(byte[] data)
