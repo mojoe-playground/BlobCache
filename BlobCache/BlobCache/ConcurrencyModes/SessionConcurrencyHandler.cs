@@ -95,6 +95,7 @@
             using (var s = Memory.CreateViewStream())
             {
                 info.WriteToStream(s);
+                s.Flush();
             }
         }
 
