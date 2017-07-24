@@ -10,6 +10,7 @@ namespace BlobCache
     using System.Threading;
     using System.Threading.Tasks;
     using ConcurrencyModes;
+    using JetBrains.Annotations;
 
     public class BlobStorage : IDisposable
     {
@@ -41,6 +42,12 @@ namespace BlobCache
         ///     Gets a value indicating whether the cache is initialized
         /// </summary>
         public bool IsInitialized { get; private set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether initialization should fail or blob storage should be truncated if a chunk loading fail at initialization
+        /// </summary>
+        [PublicAPI]
+        public bool TruncateOnChunkInitializationError { get; set; }
 
         private ConcurrencyHandler ConcurrencyHandler { get; set; }
 
@@ -634,7 +641,7 @@ namespace BlobCache
                                 position = f.Position;
                                 info.AddChunk(StorageChunk.FromStorage(br, true));
                             }
-                            catch (InvalidDataException)
+                            catch (InvalidDataException) when (TruncateOnChunkInitializationError)
                             {
                                 f.SetLength(position);
                             }
