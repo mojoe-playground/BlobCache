@@ -109,7 +109,7 @@ namespace BlobCache
                                 // if chunk size equals with the free space size, replace free space with chunk
                                 chunk = new StorageChunk(free.Id, userData, chunkType, free.Position,
                                         size, DateTime.UtcNow)
-                                    { Changing = true };
+                                { Changing = true };
                                 info.ReplaceChunk(free.Id, chunk);
                             }
                             else
@@ -629,7 +629,7 @@ namespace BlobCache
                             {
                                 token.ThrowIfCancellationRequested();
                                 position = f.Position;
-                                info.AddChunk(StorageChunk.FromStorage(br));
+                                info.AddChunk(StorageChunk.FromStorage(br, true));
                             }
                             catch (InvalidDataException)
                             {
@@ -699,7 +699,13 @@ namespace BlobCache
             using (var f = await Open(token))
             {
                 var res = new byte[target == null ? chunk.Size : Math.Min(chunk.Size, 64 * 1024)];
-                f.Position = chunk.Position + StorageChunk.ChunkHeaderSize;
+                f.Position = chunk.Position;
+                using (var br = new BinaryReader(f, Encoding.UTF8, true))
+                {
+                    var diskChunk = StorageChunk.FromStorage(br, false);
+                    if (diskChunk.Position != chunk.Position || diskChunk.Id != chunk.Id || diskChunk.Added != chunk.Added || diskChunk.Size != chunk.Size || diskChunk.Type != chunk.Type || diskChunk.UserData != chunk.UserData)
+                        throw new InvalidDataException("Blob and concurrency data mismatch");
+                }
 
                 var position = 0;
                 var read = 1;

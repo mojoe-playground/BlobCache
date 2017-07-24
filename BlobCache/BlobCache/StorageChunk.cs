@@ -29,7 +29,7 @@
 
         internal const int ChunkHeaderSize = 24;
 
-        internal static StorageChunk FromStorage(BinaryReader reader)
+        internal static StorageChunk FromStorage(BinaryReader reader, bool seekToNext)
         {
             var p = reader.BaseStream.Position;
 
@@ -45,6 +45,7 @@
             if (p + s > reader.BaseStream.Length)
                 throw new InvalidDataException("Chunk size points outside of stream");
 
+            if (seekToNext)
             reader.BaseStream.Seek(s, SeekOrigin.Current);
             return new StorageChunk(i, d, t, p, s, a);
         }
