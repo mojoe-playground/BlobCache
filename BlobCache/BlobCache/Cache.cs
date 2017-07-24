@@ -99,6 +99,13 @@
         [PublicAPI]
         public bool RemoveInvalidCache { get; set; }
 
+        /// <summary>
+        ///     Gets or sets a value indicating whether initialization should fail or blob storage should be truncated if a chunk
+        ///     loading fail at initialization
+        /// </summary>
+        [PublicAPI]
+        public bool TruncateOnChunkInitializationError { get; set; }
+
         private bool CleanupNeeded { get; }
 
         private IKeyComparer KeyComparer { get; }
@@ -387,6 +394,7 @@
                 }
 
             var res = false;
+            Storage.TruncateOnChunkInitializationError = TruncateOnChunkInitializationError;
 
             if (!RemoveInvalidCache)
             {
@@ -468,7 +476,7 @@
         }
 
         /// <summary>
-        /// Gets statistics from the cache
+        ///     Gets statistics from the cache
         /// </summary>
         /// <param name="token">Cancellation token</param>
         /// <returns>Cache statistics</returns>

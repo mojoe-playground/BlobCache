@@ -29,57 +29,6 @@
         }
 
         [Fact]
-        public async void CrcHead()
-        {
-            File.Delete("testcrc.blob");
-            using (var s = new BlobStorage("testcrc.blob"))
-            {
-                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
-
-                var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
-                await s.AddChunk(ChunkTypes.Test, 11, data, CancellationToken.None);
-            }
-
-            using (var f = File.OpenWrite("testcrc.blob"))
-            {
-                f.Position = 32;
-                f.WriteByte(5);
-            }
-
-            using (var s = new BlobStorage("testcrc.blob"))
-            {
-                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
-                s.Info.Refresh();
-                Assert.Equal(BlobStorage.HeaderSize, s.Info.Length);
-            }
-        }
-
-        [Fact]
-        public async void CrcData()
-        {
-            File.Delete("testcrc.blob");
-            using (var s = new BlobStorage("testcrc.blob"))
-            {
-                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
-
-                var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
-                await s.AddChunk(ChunkTypes.Test, 11, data, CancellationToken.None);
-            }
-
-            using (var f = File.OpenWrite("testcrc.blob"))
-            {
-                f.Position = 150;
-                f.WriteByte(5);
-            }
-
-            using (var s = new BlobStorage("testcrc.blob"))
-            {
-                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
-                await Assert.ThrowsAsync<InvalidDataException>(() =>  s.ReadChunks(sc => true, CancellationToken.None));
-            }
-        }
-
-        [Fact]
         public async void AddChunkStream()
         {
             File.Delete("test.blob");
@@ -123,6 +72,59 @@
 
                 var c4 = await s.AddChunk(ChunkTypes.Test, 14, data, CancellationToken.None);
                 Assert.Equal(c1.Id, c4.Id);
+            }
+        }
+
+        [Fact]
+        public async void CrcData()
+        {
+            File.Delete("testcrc.blob");
+            using (var s = new BlobStorage("testcrc.blob"))
+            {
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
+
+                var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
+                await s.AddChunk(ChunkTypes.Test, 11, data, CancellationToken.None);
+            }
+
+            using (var f = File.OpenWrite("testcrc.blob"))
+            {
+                f.Position = 150;
+                f.WriteByte(5);
+            }
+
+            using (var s = new BlobStorage("testcrc.blob"))
+            {
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
+                await Assert.ThrowsAsync<InvalidDataException>(() => s.ReadChunks(sc => true, CancellationToken.None));
+            }
+        }
+
+        [Fact]
+        public async void CrcHead()
+        {
+            File.Delete("testcrc.blob");
+            using (var s = new BlobStorage("testcrc.blob"))
+            {
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
+
+                var data = Enumerable.Range(0, 256).Select(r => (byte)1).ToArray();
+                await s.AddChunk(ChunkTypes.Test, 11, data, CancellationToken.None);
+            }
+
+            using (var f = File.OpenWrite("testcrc.blob"))
+            {
+                f.Position = 32;
+                f.WriteByte(5);
+            }
+
+            using (var s = new BlobStorage("testcrc.blob"))
+            {
+                await Assert.ThrowsAsync<InvalidDataException>(() => s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
+                s.TruncateOnChunkInitializationError = true;
+                Assert.True(await s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
+                s.Info.Refresh();
+                Assert.Equal(BlobStorage.HeaderSize, s.Info.Length);
             }
         }
 

@@ -44,7 +44,8 @@ namespace BlobCache
         public bool IsInitialized { get; private set; }
 
         /// <summary>
-        /// Gets or sets a value indicating whether initialization should fail or blob storage should be truncated if a chunk loading fail at initialization
+        ///     Gets or sets a value indicating whether initialization should fail or blob storage should be truncated if a chunk
+        ///     loading fail at initialization
         /// </summary>
         [PublicAPI]
         public bool TruncateOnChunkInitializationError { get; set; }
