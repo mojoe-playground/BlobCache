@@ -62,6 +62,7 @@
     <Compile Include="ConcurrencyModes\AppDomainConcurrencyHandler.cs" />
     <Compile Include="ConcurrencyModes\ConcurrencyHandler.cs" />
     <Compile Include="ConcurrencyModes\SessionConcurrencyHandler.cs" />
+    <Compile Include="Crc16.cs" />
     <Compile Include="DataHead.cs" />
     <Compile Include="IKeyComparer.cs" />
     <Compile Include="CaseSensitiveKeyComparer.cs" />

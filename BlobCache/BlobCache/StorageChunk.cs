@@ -13,21 +13,40 @@
         public uint Id { get; }
         public uint UserData { get; }
         public int ReadCount { get; internal set; }
-        public DateTime Added { get; }
+        public DateTime Added { get; private set; }
+        private long AddedTicks { get; }
+        private ushort Crc { get; }
 
         internal StorageChunk(uint id, uint userData, int chunkType, long position, uint size, DateTime added)
+            :this(id, userData,chunkType, position, size, added.Ticks)
+        {
+            Added = added;
+        }
+
+        private StorageChunk(uint id, uint userData, int chunkType, long position, uint size, long added)
         {
             Id = id;
             Type = chunkType;
             Position = position;
             Size = size;
             UserData = userData;
+            AddedTicks = added;
+
             Changing = false;
             ReadCount = 0;
-            Added = added;
+            Crc = 0;
+            Added = DateTime.MinValue;
+
+            using (var ms = new MemoryStream())
+            using (var bw = new BinaryWriter(ms))
+            {
+                ToStream(bw, false);
+                Crc = Crc16.ComputeChecksum(ms.ToArray());
+            }
         }
 
-        internal const int ChunkHeaderSize = 24;
+        internal const int ChunkHeaderSize = 26;
+        internal const int ChunkFooterSize = 2;
 
         internal static StorageChunk FromStorage(BinaryReader reader, bool seekToNext)
         {
@@ -40,14 +59,22 @@
             var i = reader.ReadUInt32();
             var d = reader.ReadUInt32();
             var s = reader.ReadUInt32();
-            var a = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
+            var a = reader.ReadInt64();
+            var crc = reader.ReadUInt16();
 
             if (p + s > reader.BaseStream.Length)
                 throw new InvalidDataException("Chunk size points outside of stream");
 
+            var chunk = new StorageChunk(i, d, t, p, s, a);
+
+            if (chunk.Crc != crc)
+                throw new InvalidDataException("Chunk header crc error");
+
+            chunk.Added = new DateTime(chunk.AddedTicks, DateTimeKind.Utc);
+
             if (seekToNext)
-            reader.BaseStream.Seek(s, SeekOrigin.Current);
-            return new StorageChunk(i, d, t, p, s, a);
+                reader.BaseStream.Seek(s + ChunkFooterSize, SeekOrigin.Current);
+            return chunk;
         }
 
         internal static StorageChunk FromStream(BinaryReader reader)
@@ -57,29 +84,49 @@
             var i = reader.ReadUInt32();
             var d = reader.ReadUInt32();
             var s = reader.ReadUInt32();
-            var a = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
+            var a = reader.ReadInt64();
+            var crc = reader.ReadUInt16();
 
-            return new StorageChunk(i, d, t, p, s, a);
+            var chunk = new StorageChunk(i, d, t, p, s, a);
+            if (chunk.Crc != crc)
+                throw new InvalidDataException("Chunk header crc error");
+            chunk.Added = new DateTime(chunk.AddedTicks, DateTimeKind.Utc);
+
+            return chunk;
         }
 
         internal void ToStorage(BinaryWriter writer, bool forceFree = false)
         {
-            writer.Write(forceFree ? ChunkTypes.Free : Type);
+            if (forceFree)
+            { 
+                new StorageChunk(Id, UserData, ChunkTypes.Free, Position, Size, Added).ToStorage(writer);
+                return;
+            }
+
+            writer.Write(Type);
             writer.Write(Id);
             writer.Write(UserData);
             writer.Write(Size);
-            writer.Write(Added.Ticks);
+            writer.Write(AddedTicks);
+            writer.Write(Crc);
             writer.Flush();
         }
 
         internal void ToStream(BinaryWriter writer)
+        {
+            ToStream(writer, true);
+        }
+
+        private void ToStream(BinaryWriter writer, bool writeCrc)
         {
             writer.Write(Position);
             writer.Write(Type);
             writer.Write(Id);
             writer.Write(UserData);
             writer.Write(Size);
-            writer.Write(Added.Ticks);
+            writer.Write(AddedTicks);
+            if (writeCrc)
+                writer.Write(Crc);
             writer.Flush();
         }
 

@@ -13,7 +13,7 @@ namespace BlobCache
 
     public class BlobStorage : IDisposable
     {
-        private const int HeaderSize = 24;
+        internal const int HeaderSize = 24;
         private const int LastVersion = 1;
 
         private Stream _mainLock;
@@ -99,7 +99,7 @@ namespace BlobCache
                         var free = info.Chunks.FirstOrDefault(fc => !fc.Changing && fc.Size == size && fc.Type == ChunkTypes.Free);
                         if (free.Type != ChunkTypes.Free)
                             // Check for free chunk bigger than required
-                            free = info.Chunks.FirstOrDefault(fc => !fc.Changing && fc.Size > size + StorageChunk.ChunkHeaderSize && fc.Type == ChunkTypes.Free);
+                            free = info.Chunks.FirstOrDefault(fc => !fc.Changing && fc.Size > size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize && fc.Type == ChunkTypes.Free);
 
                         if (free.Type == ChunkTypes.Free)
                         {
@@ -109,13 +109,13 @@ namespace BlobCache
                                 // if chunk size equals with the free space size, replace free space with chunk
                                 chunk = new StorageChunk(free.Id, userData, chunkType, free.Position,
                                         size, DateTime.UtcNow)
-                                { Changing = true };
+                                    { Changing = true };
                                 info.ReplaceChunk(free.Id, chunk);
                             }
                             else
                             {
                                 // chunk size < free space size, remove chunk sized portion of the free space
-                                free = new StorageChunk(free.Id, 0, ChunkTypes.Free, free.Position + size + StorageChunk.ChunkHeaderSize, free.Size - size - StorageChunk.ChunkHeaderSize, DateTime.UtcNow);
+                                free = new StorageChunk(free.Id, 0, ChunkTypes.Free, free.Position + size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, free.Size - size - StorageChunk.ChunkHeaderSize - StorageChunk.ChunkFooterSize, DateTime.UtcNow);
                                 info.UpdateChunk(free);
                                 chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, free.Position, size, DateTime.UtcNow) { Changing = true };
                                 info.AddChunk(chunk);
@@ -139,10 +139,10 @@ namespace BlobCache
                         {
                             // no space found, add chunk at the end of the file
                             var last = info.Chunks.OrderByDescending(ch => ch.Position).FirstOrDefault();
-                            var position = last.Position == 0 ? HeaderSize : last.Position + last.Size + StorageChunk.ChunkHeaderSize;
+                            var position = last.Position == 0 ? HeaderSize : last.Position + last.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize;
                             chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size, DateTime.UtcNow) { Changing = true };
                             info.AddChunk(chunk);
-                            f.SetLength(position + StorageChunk.ChunkHeaderSize + size);
+                            f.SetLength(position + StorageChunk.ChunkHeaderSize + size + StorageChunk.ChunkFooterSize);
                         }
 
                         WriteInfo(info);
@@ -158,22 +158,25 @@ namespace BlobCache
                     try
                     {
                         // write chunk data to stream
-                        byte[] buffer = new byte[81920];
+                        var buffer = new byte[81920];
                         long remaining = size;
+                        ushort crc = 0;
                         while (remaining > 0)
                         {
                             var bytesRead = await data.ReadAsync(buffer, 0, (int)Math.Min(remaining, buffer.Length), token).ConfigureAwait(false);
+                            crc = Crc16.ComputeChecksum(buffer, bytesRead, crc);
                             if (bytesRead != 0)
                                 await f.WriteAsync(buffer, 0, bytesRead, token).ConfigureAwait(false);
                             else
                                 break;
                             remaining -= bytesRead;
                         }
+                        w.Write(crc);
                         f.Flush();
 
                         // write correct chunk type
                         f.Position = chunk.Position;
-                        w.Write(chunk.Type);
+                        chunk.ToStorage(w);
                         f.Flush();
 
                         ok = true;
@@ -499,22 +502,22 @@ namespace BlobCache
                         var freePosition = chunk.Position;
 
                         // Check next chunk is free, combine free space
-                        var nextPos = chunk.Position + StorageChunk.ChunkHeaderSize + chunk.Size;
+                        var nextPos = chunk.Position + StorageChunk.ChunkHeaderSize + chunk.Size + StorageChunk.ChunkFooterSize;
                         var nextChunk = info.Chunks.FirstOrDefault(c => c.Position == nextPos);
 
                         if (nextChunk.Type == ChunkTypes.Free && !nextChunk.Changing)
                         {
-                            freeSize += StorageChunk.ChunkHeaderSize + nextChunk.Size;
+                            freeSize += StorageChunk.ChunkHeaderSize + nextChunk.Size + StorageChunk.ChunkFooterSize;
                             info.RemoveChunk(nextChunk);
                         }
 
                         // Check previous chunk is free, combine free space
                         var pos = chunk.Position;
-                        var previousChunk = info.Chunks.FirstOrDefault(c => c.Position + c.Size + StorageChunk.ChunkHeaderSize == pos);
+                        var previousChunk = info.Chunks.FirstOrDefault(c => c.Position + c.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize == pos);
 
                         if (previousChunk.Type == ChunkTypes.Free && !previousChunk.Changing)
                         {
-                            freeSize += StorageChunk.ChunkHeaderSize + previousChunk.Size;
+                            freeSize += StorageChunk.ChunkHeaderSize + previousChunk.Size + StorageChunk.ChunkFooterSize;
                             freePosition = previousChunk.Position;
                             info.RemoveChunk(previousChunk);
                         }
@@ -560,7 +563,7 @@ namespace BlobCache
 
                 return new StorageStatistics
                 {
-                    Overhead = chunks.Count * StorageChunk.ChunkHeaderSize + HeaderSize,
+                    Overhead = chunks.Count * (StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize) + HeaderSize,
                     UsedChunks = used.Count,
                     UsedSpace = used.Sum(c => c.Size),
                     FreeChunks = free.Count,
@@ -622,7 +625,7 @@ namespace BlobCache
                     using (var f = OpenFile())
                     using (var br = new BinaryReader(f, Encoding.UTF8))
                     {
-                        f.Position = 24;
+                        f.Position = HeaderSize;
                         var position = f.Position;
                         while (f.Position != f.Length)
                             try
@@ -697,15 +700,15 @@ namespace BlobCache
         private async Task<(StorageChunk, byte[], Stream)> ReadChunk(StorageChunk chunk, Stream target, CancellationToken token)
         {
             using (var f = await Open(token))
+            using (var br = new BinaryReader(f, Encoding.UTF8, true))
             {
+                ushort crc = 0;
                 var res = new byte[target == null ? chunk.Size : Math.Min(chunk.Size, 64 * 1024)];
                 f.Position = chunk.Position;
-                using (var br = new BinaryReader(f, Encoding.UTF8, true))
-                {
-                    var diskChunk = StorageChunk.FromStorage(br, false);
-                    if (diskChunk.Position != chunk.Position || diskChunk.Id != chunk.Id || diskChunk.Added != chunk.Added || diskChunk.Size != chunk.Size || diskChunk.Type != chunk.Type || diskChunk.UserData != chunk.UserData)
-                        throw new InvalidDataException("Blob and concurrency data mismatch");
-                }
+
+                var diskChunk = StorageChunk.FromStorage(br, false);
+                if (diskChunk.Position != chunk.Position || diskChunk.Id != chunk.Id || diskChunk.Added != chunk.Added || diskChunk.Size != chunk.Size || diskChunk.Type != chunk.Type || diskChunk.UserData != chunk.UserData)
+                    throw new InvalidDataException("Blob and concurrency data mismatch");
 
                 var position = 0;
                 var read = 1;
@@ -714,10 +717,16 @@ namespace BlobCache
                 {
                     read = await f.ReadAsync(res, 0, (int)Math.Min(res.Length, chunk.Size - position), token);
                     position += read;
+                    crc = Crc16.ComputeChecksum(res, read, crc);
 
                     if (target != null)
                         await target.WriteAsync(res, 0, read, token);
                 }
+
+                var diskCrc = br.ReadUInt16();
+
+                if (diskCrc != crc)
+                    throw new InvalidDataException("Invalid data read from blob storage");
 
                 return (chunk, res, target);
             }
