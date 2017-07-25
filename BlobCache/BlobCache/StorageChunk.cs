@@ -51,7 +51,7 @@
         internal static StorageChunk FromStorage(BinaryReader reader, bool seekToNext, long p)
         {
             var bp = reader.BaseStream.Position;
-            if (bp+ChunkHeaderSize > reader.BaseStream.Length)
+            if (bp + ChunkHeaderSize > reader.BaseStream.Length)
                 throw new InvalidDataException("No room in stream for chunk header");
 
             var t = reader.ReadInt32();
@@ -61,7 +61,7 @@
             var a = reader.ReadInt64();
             var crc = reader.ReadUInt16();
 
-            if (bp+ChunkHeaderSize + s + ChunkFooterSize > reader.BaseStream.Length)
+            if (bp + ChunkHeaderSize + s + ChunkFooterSize > reader.BaseStream.Length)
                 throw new InvalidDataException("Chunk size points outside of stream");
 
             var chunk = new StorageChunk(i, d, t, p, s, a);

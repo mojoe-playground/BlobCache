@@ -62,7 +62,12 @@
             private readonly IDisposable _locker;
             private readonly long _position;
             private readonly FileStream _stream;
+            private byte[] _buffer = new byte[4096];
             private long _internalPosition;
+            private int _readLength;
+            private long _readPos = -1;
+            private int _writeLength;
+            private long _writePos = -1;
 
             public RangeStream(IDisposable locker, FileStream stream, long position, long length, bool canWrite)
             {
@@ -89,21 +94,34 @@
 
             public override void Flush()
             {
-                _stream.Flush();
+                FlushWrite();
+                if (_stream.CanSeek)
+                    _stream.Flush();
             }
 
             public override int Read(byte[] buffer, int offset, int count)
             {
+                FlushWrite();
+
+                _stream.Position = _internalPosition + _position;
                 var maxCount = (int)Math.Min(count, Length - _internalPosition);
-                try
+                if (maxCount > _buffer.Length)
                 {
                     var read = _stream.Read(buffer, offset, maxCount);
+                    _internalPosition += read;
                     return read;
                 }
-                finally
+
+                if (_readPos < 0 || _readPos > _internalPosition || _readPos + _readLength < _internalPosition + maxCount)
                 {
-                    _internalPosition = _stream.Position - _position;
+                    _readPos = _internalPosition;
+                    _readLength = _stream.Read(_buffer, 0, (int)Math.Min(_buffer.Length, Length - _internalPosition));
                 }
+
+                Array.Copy(_buffer, _internalPosition - _readPos, buffer, offset, maxCount);
+                _internalPosition += maxCount;
+                _stream.Position = _internalPosition + _position;
+                return maxCount;
             }
 
             public override long Seek(long offset, SeekOrigin origin)
@@ -127,15 +145,8 @@
                 if (targetPosition > Length)
                     throw new ArgumentOutOfRangeException(nameof(offset));
 
-                try
-                {
-                    _stream.Position = _position + targetPosition;
-                }
-                catch (ObjectDisposedException)
-                {
-                }
-
                 _internalPosition = targetPosition;
+                _stream.Position = _internalPosition + _position;
                 return _internalPosition;
             }
 
@@ -146,21 +157,61 @@
 
             public override void Write(byte[] buffer, int offset, int count)
             {
+                FlushRead();
+
                 var maxCount = (int)Math.Min(count, Length - _internalPosition);
-                try
+
+                if (maxCount > _buffer.Length)
                 {
+                    FlushWrite();
+
+                    _stream.Position = _internalPosition + _position;
                     _stream.Write(buffer, offset, maxCount);
+                    _internalPosition += maxCount;
+                    return;
                 }
-                finally
+
+                if (_writePos >= 0 && _writePos + _writeLength == _internalPosition && _writeLength + maxCount < _buffer.Length)
                 {
-                    _internalPosition = _stream.Position - _position;
+                    Array.Copy(buffer, offset, _buffer, _writeLength, maxCount);
+                    _writeLength += maxCount;
+                    _internalPosition += maxCount;
+                    return;
                 }
+
+                FlushWrite();
+
+                Array.Copy(buffer, offset, _buffer, 0, maxCount);
+                _writePos = _internalPosition;
+                _writeLength = maxCount;
+                _internalPosition += maxCount;
             }
 
             protected override void Dispose(bool disposing)
             {
+                Flush();
                 base.Dispose(disposing);
                 _locker.Dispose();
+                _buffer = null;
+            }
+
+            private void FlushRead()
+            {
+                _readPos = -1;
+                _readLength = 0;
+            }
+
+            private void FlushWrite()
+            {
+                if (_writePos < 0)
+                    return;
+
+                _stream.Position = _writePos + _position;
+                _stream.Write(_buffer, 0, _writeLength);
+                _writePos = -1;
+                _writeLength = 0;
+
+                _stream.Position = _internalPosition + _position;
             }
         }
 
