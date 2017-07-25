@@ -237,7 +237,7 @@
 
                 await s.RemoveChunk(sc => sc.Chunks.FirstOrDefault(c => c.Id == c1.Id), CancellationToken.None);
 
-                Assert.Equal(c1, (await s.GetChunks(CancellationToken.None)).Single());
+                Assert.Equal(c1.Id, (await s.GetChunks(CancellationToken.None)).Single().Id);
 
                 Assert.Equal(ChunkTypes.Free, (await s.GetChunks(CancellationToken.None)).Single().Type);
             }

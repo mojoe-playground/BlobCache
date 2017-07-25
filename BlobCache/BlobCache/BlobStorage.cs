@@ -718,7 +718,7 @@ namespace BlobCache
                 f.Position = chunk.Position;
 
                 var diskChunk = StorageChunk.FromStorage(br, false);
-                if (diskChunk.Position != chunk.Position || diskChunk.Id != chunk.Id || diskChunk.Added != chunk.Added || diskChunk.Size != chunk.Size || diskChunk.Type != chunk.Type || diskChunk.UserData != chunk.UserData)
+                if (diskChunk!=chunk)
                     throw new InvalidDataException("Blob and concurrency data mismatch");
 
                 var position = 0;

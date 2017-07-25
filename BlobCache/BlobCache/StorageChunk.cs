@@ -132,7 +132,7 @@
 
         public bool Equals(StorageChunk other)
         {
-            return Id == other.Id;
+            return other.Position == Position && other.Id == Id && other.Added == Added && other.Size == Size && other.Type == Type && other.UserData == UserData && other.Crc == Crc;
         }
 
         public override bool Equals(object obj)
@@ -143,7 +143,7 @@
 
         public override int GetHashCode()
         {
-            return (int)Id;
+            return Crc;
         }
 
         public static bool operator ==(StorageChunk left, StorageChunk right)
