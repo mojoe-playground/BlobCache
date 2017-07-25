@@ -18,7 +18,7 @@
         private ushort Crc { get; }
 
         internal StorageChunk(uint id, uint userData, int chunkType, long position, uint size, DateTime added)
-            :this(id, userData,chunkType, position, size, added.Ticks)
+            : this(id, userData, chunkType, position, size, added.Ticks)
         {
             Added = added;
         }
@@ -40,7 +40,7 @@
             using (var ms = new MemoryStream())
             using (var bw = new BinaryWriter(ms))
             {
-                ToStream(bw, false);
+                ToStorage(bw, false, true);
                 Crc = Crc16.ComputeChecksum(ms.ToArray());
             }
         }
@@ -48,11 +48,10 @@
         internal const int ChunkHeaderSize = 26;
         internal const int ChunkFooterSize = 2;
 
-        internal static StorageChunk FromStorage(BinaryReader reader, bool seekToNext)
+        internal static StorageChunk FromStorage(BinaryReader reader, bool seekToNext, long p)
         {
-            var p = reader.BaseStream.Position;
-
-            if (p + ChunkHeaderSize > reader.BaseStream.Length)
+            var bp = reader.BaseStream.Position;
+            if (bp+ChunkHeaderSize > reader.BaseStream.Length)
                 throw new InvalidDataException("No room in stream for chunk header");
 
             var t = reader.ReadInt32();
@@ -62,7 +61,7 @@
             var a = reader.ReadInt64();
             var crc = reader.ReadUInt16();
 
-            if (p + ChunkHeaderSize + s + ChunkFooterSize > reader.BaseStream.Length)
+            if (bp+ChunkHeaderSize + s + ChunkFooterSize > reader.BaseStream.Length)
                 throw new InvalidDataException("Chunk size points outside of stream");
 
             var chunk = new StorageChunk(i, d, t, p, s, a);
@@ -86,8 +85,10 @@
             var s = reader.ReadUInt32();
             var a = reader.ReadInt64();
             var crc = reader.ReadUInt16();
+            var c = reader.ReadBoolean();
+            var rc = reader.ReadInt32();
 
-            var chunk = new StorageChunk(i, d, t, p, s, a);
+            var chunk = new StorageChunk(i, d, t, p, s, a) { Changing = c, ReadCount = rc };
             if (chunk.Crc != crc)
                 throw new InvalidDataException("Chunk header crc error");
             chunk.Added = new DateTime(chunk.AddedTicks, DateTimeKind.Utc);
@@ -95,10 +96,10 @@
             return chunk;
         }
 
-        internal void ToStorage(BinaryWriter writer, bool forceFree = false)
+        internal void ToStorage(BinaryWriter writer, bool forceFree = false, bool skipCrc = false)
         {
             if (forceFree)
-            { 
+            {
                 new StorageChunk(Id, UserData, ChunkTypes.Free, Position, Size, Added).ToStorage(writer);
                 return;
             }
@@ -108,16 +109,12 @@
             writer.Write(UserData);
             writer.Write(Size);
             writer.Write(AddedTicks);
-            writer.Write(Crc);
+            if (!skipCrc)
+                writer.Write(Crc);
             writer.Flush();
         }
 
         internal void ToStream(BinaryWriter writer)
-        {
-            ToStream(writer, true);
-        }
-
-        private void ToStream(BinaryWriter writer, bool writeCrc)
         {
             writer.Write(Position);
             writer.Write(Type);
@@ -125,8 +122,9 @@
             writer.Write(UserData);
             writer.Write(Size);
             writer.Write(AddedTicks);
-            if (writeCrc)
-                writer.Write(Crc);
+            writer.Write(Crc);
+            writer.Write(Changing);
+            writer.Write(ReadCount);
             writer.Flush();
         }
 

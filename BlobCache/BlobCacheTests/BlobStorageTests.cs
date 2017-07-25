@@ -410,10 +410,10 @@
         private static async Task Concurrency<T>()
             where T : ConcurrencyHandler, new()
         {
-            File.Delete("concurrency.blob");
+            File.Delete($"concurrency-{typeof(T).Name}.blob");
 
             var rn = new Random();
-            using (var s = new BlobStorage("concurrency.blob"))
+            using (var s = new BlobStorage($"concurrency-{typeof(T).Name}.blob"))
             {
                 await s.Initialize<T>(CancellationToken.None);
 
@@ -425,7 +425,7 @@
             }
 
             var counter = 0;
-            const int max = 100;
+            const int max = 50;
 
             for (var i = 0; i < max; i++)
             {
@@ -434,17 +434,19 @@
                     try
                     {
                         var r = new Random();
-                        using (var s = new BlobStorage("concurrency.blob"))
+                        using (var s = new BlobStorage($"concurrency-{typeof(T).Name}.blob"))
                         {
                             s.Initialize<T>(CancellationToken.None).Wait();
 
-                            for (uint j = 0; j < 10; j++)
+                            for (uint j = 0; j < 50; j++)
                             {
-                                var op = r.Next(2);
+                                var op = r.Next(4);
                                 if (op == 0)
                                     s.AddChunk(ChunkTypes.Test, j, Enumerable.Range(0, r.Next(500) + 500).Select(_ => (byte)r.Next(256)).ToArray(), CancellationToken.None).Wait();
-                                if (op == 1)
+                                else if (op == 1)
                                     s.RemoveChunk(si => si.Chunks.Count == 0 ? (StorageChunk?)null : si.Chunks[r.Next(si.Chunks.Count)], CancellationToken.None).Wait();
+                                else
+                                    s.ReadChunks(si => si.Chunks.Count == 0 ? null : new[] { si.Chunks[r.Next(si.Chunks.Count)] }, CancellationToken.None).Wait();
                             }
                         }
                     }
@@ -461,7 +463,7 @@
             while (counter < max)
                 Thread.Sleep(100);
 
-            using (var s = new BlobStorage("concurrency.blob"))
+            using (var s = new BlobStorage($"concurrency-{typeof(T).Name}.blob"))
             {
                 Assert.True(await s.Initialize<T>(CancellationToken.None));
             }
@@ -471,10 +473,10 @@
         private static async Task ConcurrencyAdd<T>()
             where T : ConcurrencyHandler, new()
         {
-            File.Delete("concurrencyAdd.blob");
+            File.Delete($"concurrencyAdd-{typeof(T).Name}.blob");
 
             var rn = new Random();
-            using (var s = new BlobStorage("concurrencyAdd.blob"))
+            using (var s = new BlobStorage($"concurrencyAdd-{typeof(T).Name}.blob"))
             {
                 await s.Initialize<T>(CancellationToken.None);
 
@@ -486,7 +488,7 @@
             }
 
             var counter = 0;
-            const int max = 100;
+            const int max = 25;
 
             for (var i = 0; i < max; i++)
             {
@@ -495,11 +497,11 @@
                     try
                     {
                         var r = new Random();
-                        using (var s = new BlobStorage("concurrencyAdd.blob"))
+                        using (var s = new BlobStorage($"concurrencyAdd-{typeof(T).Name}.blob"))
                         {
                             s.Initialize<T>(CancellationToken.None).Wait();
 
-                            for (uint j = 0; j < 10; j++)
+                            for (uint j = 0; j < 40; j++)
                                 s.AddChunk(ChunkTypes.Test, j, Enumerable.Range(0, r.Next(500) + 500).Select(_ => (byte)r.Next(256)).ToArray(), CancellationToken.None).Wait();
                         }
                     }
@@ -516,7 +518,7 @@
             while (counter < max)
                 Thread.Sleep(100);
 
-            using (var s = new BlobStorage("concurrencyAdd.blob"))
+            using (var s = new BlobStorage($"concurrencyAdd-{typeof(T).Name}.blob"))
             {
                 Assert.True(await s.Initialize<T>(CancellationToken.None));
             }
@@ -526,19 +528,19 @@
         private static async Task ConcurrencyRemove<T>()
             where T : ConcurrencyHandler, new()
         {
-            File.Delete("concurrencyRemove.blob");
+            File.Delete($"concurrencyRemove-{typeof(T).Name}.blob");
 
             var rn = new Random();
-            using (var s = new BlobStorage("concurrencyRemove.blob"))
+            using (var s = new BlobStorage($"concurrencyRemove-{typeof(T).Name}.blob"))
             {
                 await s.Initialize<T>(CancellationToken.None);
 
-                for (uint j = 0; j < 050; j++)
+                for (uint j = 0; j < 50; j++)
                     await s.AddChunk(ChunkTypes.Test, j, Enumerable.Range(0, rn.Next(500) + 500).Select(_ => (byte)rn.Next(256)).ToArray(), CancellationToken.None);
             }
 
             var counter = 0;
-            const int max = 100;
+            const int max = 25;
 
             for (var i = 0; i < max; i++)
             {
@@ -547,11 +549,11 @@
                     try
                     {
                         var r = new Random();
-                        using (var s = new BlobStorage("concurrencyRemove.blob"))
+                        using (var s = new BlobStorage($"concurrencyRemove-{typeof(T).Name}.blob"))
                         {
                             s.Initialize<T>(CancellationToken.None).Wait();
 
-                            for (uint j = 0; j < 10; j++)
+                            for (uint j = 0; j < 40; j++)
                                 s.RemoveChunk(si => si.Chunks.Count == 0 ? (StorageChunk?)null : si.Chunks[r.Next(si.Chunks.Count)], CancellationToken.None).Wait();
                         }
                     }
@@ -568,7 +570,7 @@
             while (counter < max)
                 Thread.Sleep(100);
 
-            using (var s = new BlobStorage("concurrencyRemove.blob"))
+            using (var s = new BlobStorage($"concurrencyRemove-{typeof(T).Name}.blob"))
             {
                 Assert.True(await s.Initialize<T>(CancellationToken.None));
             }
@@ -577,10 +579,10 @@
         private static async Task Repeated<T>()
             where T : ConcurrencyHandler, new()
         {
-            File.Delete("repeated.blob");
+            File.Delete($"repeated-{typeof(T).Name}.blob");
 
             var rn = new Random();
-            using (var s = new BlobStorage("repeated.blob"))
+            using (var s = new BlobStorage($"repeated-{typeof(T).Name}.blob"))
             {
                 await s.Initialize<T>(CancellationToken.None);
 
@@ -592,17 +594,17 @@
             }
 
             var counter = 0;
-            const int max = 100;
+            const int max = 25;
 
             for (var i = 0; i < max; i++)
                 try
                 {
                     var r = new Random();
-                    using (var s = new BlobStorage("repeated.blob"))
+                    using (var s = new BlobStorage($"repeated-{typeof(T).Name}.blob"))
                     {
                         s.Initialize<T>(CancellationToken.None).Wait();
 
-                        for (uint j = 0; j < 10; j++)
+                        for (uint j = 0; j < 40; j++)
                         {
                             var op = r.Next(2);
                             if (op == 0)
@@ -621,7 +623,7 @@
             while (counter < max)
                 Thread.Sleep(100);
 
-            using (var s = new BlobStorage("repeated.blob"))
+            using (var s = new BlobStorage($"repeated-{typeof(T).Name}.blob"))
             {
                 Assert.True(await s.Initialize<T>(CancellationToken.None));
             }

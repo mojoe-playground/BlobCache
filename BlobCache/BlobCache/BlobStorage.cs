@@ -1,5 +1,5 @@
 ﻿
-#define DebugLogging
+//#define DebugLogging
 
 namespace BlobCache
 {
@@ -19,7 +19,7 @@ namespace BlobCache
         internal const int HeaderSize = 24;
         private const int LastVersion = 1;
 
-        private Stream _mainLock;
+        private FileStream _mainLock;
 
         /// <summary>
         ///     Initializes a new instance of the <see cref="BlobStorage" /> class
@@ -99,17 +99,21 @@ namespace BlobCache
                 StorageChunk chunk;
 
                 using (var f = await Open(token))
-                using (var w = new BinaryWriter(f, Encoding.UTF8))
                 {
+                    long lockSize;
+
                     using (Lock(ConcurrencyHandler.Timeout, token))
                     {
                         var info = ReadInfo();
+
+                        CheckInitialized(info);
 
                         // Check for exact size free chunk
                         var free = info.Chunks.FirstOrDefault(fc => !fc.Changing && fc.Size == size && fc.Type == ChunkTypes.Free);
                         if (free.Type != ChunkTypes.Free)
                             // Check for free chunk bigger than required
                             free = info.Chunks.FirstOrDefault(fc => !fc.Changing && fc.Size > size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize && fc.Type == ChunkTypes.Free);
+                        StorageChunk? newFree = null;
 
                         if (free.Type == ChunkTypes.Free)
                         {
@@ -117,26 +121,20 @@ namespace BlobCache
                             if (free.Size == size)
                             {
                                 // if chunk size equals with the free space size, replace free space with chunk
-                                chunk = new StorageChunk(free.Id, userData, chunkType, free.Position,
-                                        size, DateTime.UtcNow)
-                                { Changing = true };
+                                chunk = new StorageChunk(free.Id, userData, chunkType, free.Position, size, DateTime.UtcNow) { Changing = true };
                                 info.ReplaceChunk(free.Id, chunk);
+                                lockSize = size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize;
                                 Log($"Replacing free chunk {free} with chunk {chunk}");
                             }
                             else
                             {
                                 // chunk size < free space size, remove chunk sized portion of the free space
-                                var newFree = new StorageChunk(free.Id, 0, ChunkTypes.Free, free.Position + size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, free.Size - size - StorageChunk.ChunkHeaderSize - StorageChunk.ChunkFooterSize, DateTime.UtcNow);
-                                info.UpdateChunk(newFree);
+                                newFree = new StorageChunk(free.Id, 0, ChunkTypes.Free, free.Position + size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, free.Size - size - StorageChunk.ChunkHeaderSize - StorageChunk.ChunkFooterSize, DateTime.UtcNow);
+                                info.UpdateChunk(newFree.Value);
                                 chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, free.Position, size, DateTime.UtcNow) { Changing = true };
                                 info.AddChunk(chunk);
+                                lockSize = free.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize;
                                 Log($"Split free chunk {free} to chunk {chunk} and free {newFree}");
-
-                                // write out new free chunk header
-                                f.Position = newFree.Position;
-                                newFree.ToStorage(w);
-
-                                f.Flush();
                             }
                         }
                         else
@@ -146,51 +144,74 @@ namespace BlobCache
                             var position = last.Position == 0 ? HeaderSize : last.Position + last.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize;
                             chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size, DateTime.UtcNow) { Changing = true };
                             info.AddChunk(chunk);
+                            lockSize = chunk.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize;
                             Log($"Add chunk {chunk}");
-                            f.SetLength(position + StorageChunk.ChunkHeaderSize + size + StorageChunk.ChunkFooterSize);
+                        }
+
+                        using (var fr = f.Range(chunk.Position, lockSize, LockMode.Exclusive))
+                        using (var w = new BinaryWriter(fr, Encoding.UTF8, true))
+                        {
+                            if (f.Length < chunk.Position + lockSize)
+                                f.SetLength(chunk.Position + lockSize);
+
+                            if (newFree.HasValue)
+                            {
+                                // write out new free chunk header
+                                fr.Position = newFree.Value.Position - chunk.Position;
+                                newFree.Value.ToStorage(w);
+                                fr.Flush();
+                            }
+
+                            // write chunk data to blob with FREE chunk type
+                            fr.Position = 0;
+                            chunk.ToStorage(w, true);
+                            fr.Flush();
                         }
 
                         WriteInfo(info);
-
-                        // write chunk data to blob with FREE chunk type
-                        f.Position = chunk.Position;
-                        chunk.ToStorage(w, true);
-                        f.Flush();
                     }
 
                     var ok = false;
 
                     try
                     {
-                        // write chunk data to stream
-                        var buffer = new byte[81920];
-                        long remaining = size;
-                        ushort crc = 0;
-                        while (remaining > 0)
+                        using (var fr = f.Range(chunk.Position, lockSize, LockMode.Exclusive))
+                        using (var w = new BinaryWriter(fr, Encoding.UTF8, true))
                         {
-                            var bytesRead = await data.ReadAsync(buffer, 0, (int)Math.Min(remaining, buffer.Length), token).ConfigureAwait(false);
-                            crc = Crc16.ComputeChecksum(buffer, bytesRead, crc);
-                            if (bytesRead != 0)
-                                await f.WriteAsync(buffer, 0, bytesRead, token).ConfigureAwait(false);
-                            else
-                                break;
-                            remaining -= bytesRead;
+                            fr.Position = StorageChunk.ChunkHeaderSize;
+
+                            // write chunk data to stream
+                            var buffer = new byte[81920];
+                            long remaining = size;
+                            ushort crc = 0;
+                            while (remaining > 0)
+                            {
+                                var bytesRead = await data.ReadAsync(buffer, 0, (int)Math.Min(remaining, buffer.Length), token).ConfigureAwait(false);
+                                crc = Crc16.ComputeChecksum(buffer, bytesRead, crc);
+                                if (bytesRead != 0)
+                                    await fr.WriteAsync(buffer, 0, bytesRead, token).ConfigureAwait(false);
+                                else
+                                    break;
+                                remaining -= bytesRead;
+                            }
+                            w.Write(crc);
+                            fr.Flush();
+
+                            // write correct chunk type
+                            fr.Position = 0;
+                            chunk.ToStorage(w);
+                            fr.Flush();
+
+                            ok = true;
                         }
-                        w.Write(crc);
-                        f.Flush();
-
-                        // write correct chunk type
-                        f.Position = chunk.Position;
-                        chunk.ToStorage(w);
-                        f.Flush();
-
-                        ok = true;
                     }
                     finally
                     {
                         using (Lock(ConcurrencyHandler.Timeout, CancellationToken.None))
                         {
                             var info = ReadInfo();
+
+                            CheckInitialized(info);
 
                             // Exception occured, chunk should stay free
                             if (!ok)
@@ -222,6 +243,8 @@ namespace BlobCache
                     {
                         var info = ReadInfo();
 
+                        CheckInitialized(info);
+
                         var position = f.Length;
                         while (info.Chunks.Count > 0)
                         {
@@ -237,7 +260,10 @@ namespace BlobCache
                         if (position == f.Length)
                             return;
 
-                        f.SetLength(position);
+                        using (f.Lock(position, f.Length - position, LockMode.Exclusive))
+                        {
+                            f.SetLength(position);
+                        }
                         WriteInfo(info);
                     }
                 }
@@ -486,10 +512,11 @@ namespace BlobCache
                         ConcurrencyHandler.WaitForReadFinish(token);
 
                     using (var f = await Open(token))
-                    using (var w = new BinaryWriter(f, Encoding.UTF8))
                     using (Lock(ConcurrencyHandler.Timeout, token))
                     {
                         var info = ReadInfo();
+
+                        CheckInitialized(info);
 
                         // Get the chunk to delete
                         var item = selector.Invoke(info.FilterChunks(c => c.Type != ChunkTypes.Free && !c.Changing));
@@ -534,11 +561,13 @@ namespace BlobCache
                         var freeChunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition, freeSize, DateTime.UtcNow);
                         info.UpdateChunk(freeChunk);
 
-                        // Mark the chunk free
-                        f.Position = freeChunk.Position;
-                        freeChunk.ToStorage(w);
-
-                        f.Flush();
+                        using (var fr = f.Range(freeChunk.Position, freeSize + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, LockMode.Exclusive))
+                        using (var w = new BinaryWriter(fr, Encoding.UTF8, true))
+                        {
+                            // Mark the chunk free
+                            freeChunk.ToStorage(w);
+                            fr.Flush();
+                        }
 
                         Log($"Remove chunk {chunk} (previous: {previousChunk}, next: {nextChunk}), result: {freeChunk}");
 
@@ -587,7 +616,9 @@ namespace BlobCache
             {
                 using (Lock(ConcurrencyHandler.Timeout, token))
                 {
-                    return ReadInfo().Chunks;
+                    var info = ReadInfo();
+                    CheckInitialized(info);
+                    return info.Chunks;
                 }
             }, token);
         }
@@ -600,7 +631,8 @@ namespace BlobCache
             if (_mainLock.Length < HeaderSize)
                 throw new NotSupportedException("Unknown file format (file too short)");
 
-            using (var r = new BinaryReader(_mainLock, Encoding.UTF8, true))
+            using (var fr = _mainLock.Range(0, HeaderSize, LockMode.Shared))
+            using (var r = new BinaryReader(fr, Encoding.UTF8, true))
             {
                 var blob = r.ReadInt32();
                 if (blob != ChunkTypes.Blob)
@@ -609,7 +641,7 @@ namespace BlobCache
                 if (version > LastVersion)
                     throw new NotSupportedException("Unknown file version");
                 Id = new Guid(r.ReadBytes(16));
-                ConcurrencyHandler.Id = Id;
+                ConcurrencyHandler.SetId(Id);
             }
         }
 
@@ -627,20 +659,22 @@ namespace BlobCache
                     Log("Initialize info");
 
                     using (var f = OpenFile())
-                    using (var br = new BinaryReader(f, Encoding.UTF8))
+                    using (var fr = f.Range(0, f.Length, LockMode.Shared))
+                    using (var br = new BinaryReader(fr, Encoding.UTF8))
                     {
-                        f.Position = HeaderSize;
-                        var position = f.Position;
-                        while (f.Position != f.Length)
+                        fr.Position = HeaderSize;
+                        var position = fr.Position;
+                        while (fr.Position != fr.Length)
                             try
                             {
                                 token.ThrowIfCancellationRequested();
-                                position = f.Position;
-                                info.AddChunk(StorageChunk.FromStorage(br, true));
+                                position = fr.Position;
+                                info.AddChunk(StorageChunk.FromStorage(br, true, f.Position));
                             }
                             catch (InvalidDataException) when (TruncateOnChunkInitializationError)
                             {
                                 f.SetLength(position);
+                                break;
                             }
                     }
 
@@ -652,6 +686,13 @@ namespace BlobCache
             }, token);
         }
 
+        // ReSharper disable once UnusedParameter.Local
+        private void CheckInitialized(StorageInfo info)
+        {
+            if (!info.Initialized)
+                throw new InvalidOperationException("Storage not initialized!");
+        }
+
         private bool CloseLock()
         {
             _mainLock?.Close();
@@ -659,16 +700,11 @@ namespace BlobCache
             return false;
         }
 
-        [Conditional("DebugLogging")]
-        private void Log(string log)
-        {
-            Debug.WriteLine($"BlobStorage: {GetHashCode():x8} {log}");
-        }
-
         private void CreateEmptyBlobStorage()
         {
             using (var f = Info.Create())
-            using (var w = new BinaryWriter(f, Encoding.UTF8))
+            using (var fr = f.Range(0, HeaderSize, LockMode.Exclusive))
+            using (var w = new BinaryWriter(fr, Encoding.UTF8))
             {
                 Log("New file created");
                 w.Write(ChunkTypes.Blob);
@@ -692,7 +728,16 @@ namespace BlobCache
 
         private IDisposable Lock(int timeout, CancellationToken token)
         {
-            return ConcurrencyHandler.Lock(timeout, token);
+            Log("Waiting for lock");
+            var res = ConcurrencyHandler.Lock(timeout, token);
+            Log("Lock entered");
+            return res;
+        }
+
+        [Conditional("DebugLogging")]
+        private void Log(string log)
+        {
+            Debug.WriteLine($"BlobStorage: {GetHashCode():x8} {log}");
         }
 
         private async Task<FileStream> Open(CancellationToken token)
@@ -705,20 +750,21 @@ namespace BlobCache
 
         private FileStream OpenFile()
         {
-            return new FileStream(Info.FullName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+            return new FileStream(Info.FullName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite, 1);
         }
 
         private async Task<(StorageChunk, byte[], Stream)> ReadChunk(StorageChunk chunk, Stream target, CancellationToken token)
         {
             using (var f = await Open(token))
-            using (var br = new BinaryReader(f, Encoding.UTF8, true))
+            using (var fr = f.Range(chunk.Position, chunk.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, LockMode.Shared))
+            using (var br = new BinaryReader(fr, Encoding.UTF8, true))
             {
+                Log($"Reading chunk: {chunk}");
                 ushort crc = 0;
                 var res = new byte[target == null ? chunk.Size : Math.Min(chunk.Size, 64 * 1024)];
-                f.Position = chunk.Position;
 
-                var diskChunk = StorageChunk.FromStorage(br, false);
-                if (diskChunk!=chunk)
+                var diskChunk = StorageChunk.FromStorage(br, false, f.Position);
+                if (diskChunk != chunk)
                     throw new InvalidDataException("Blob and concurrency data mismatch");
 
                 var position = 0;
@@ -726,7 +772,7 @@ namespace BlobCache
 
                 while (position < chunk.Size && read != 0)
                 {
-                    read = await f.ReadAsync(res, 0, (int)Math.Min(res.Length, chunk.Size - position), token);
+                    read = await fr.ReadAsync(res, 0, (int)Math.Min(res.Length, chunk.Size - position), token);
                     position += read;
                     crc = Crc16.ComputeChecksum(res, read, crc);
 
@@ -756,6 +802,8 @@ namespace BlobCache
                 {
                     var info = ReadInfo();
 
+                    CheckInitialized(info);
+
                     chunksToRead = selector.Invoke(info.FilterChunks(c => !c.Changing && c.Type != ChunkTypes.Free))?.ToList();
                     if (chunksToRead == null)
                         return;
@@ -765,6 +813,7 @@ namespace BlobCache
                         var chunk = r;
                         chunk.ReadCount++;
                         info.UpdateChunk(chunk);
+                        Log($"Mark chunk reading: {chunk}, {chunk.ReadCount}");
                     }
 
                     WriteInfo(info);
@@ -792,12 +841,15 @@ namespace BlobCache
                     {
                         var info = ReadInfo();
 
+                        CheckInitialized(info);
+
                         foreach (var r in chunksToRead)
                         {
-                            var chunk = r;
+                            var chunk = info.GetChunkById(r.Id);
                             chunk.ReadCount--;
                             info.UpdateChunk(chunk);
                             finishedOne = finishedOne || chunk.ReadCount == 0;
+                            Log($"Unmark chunk reading: {chunk}, {chunk.ReadCount}");
                         }
 
                         WriteInfo(info);
