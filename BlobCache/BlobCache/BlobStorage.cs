@@ -1,9 +1,11 @@
 ﻿
-#define InvalidChunkDebug
+#define DebugLogging
+
 namespace BlobCache
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Text;
@@ -117,28 +119,22 @@ namespace BlobCache
                                 // if chunk size equals with the free space size, replace free space with chunk
                                 chunk = new StorageChunk(free.Id, userData, chunkType, free.Position,
                                         size, DateTime.UtcNow)
-                                    { Changing = true };
+                                { Changing = true };
                                 info.ReplaceChunk(free.Id, chunk);
+                                Log($"Replacing free chunk {free} with chunk {chunk}");
                             }
                             else
                             {
                                 // chunk size < free space size, remove chunk sized portion of the free space
-                                free = new StorageChunk(free.Id, 0, ChunkTypes.Free, free.Position + size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, free.Size - size - StorageChunk.ChunkHeaderSize - StorageChunk.ChunkFooterSize, DateTime.UtcNow);
-                                info.UpdateChunk(free);
+                                var newFree = new StorageChunk(free.Id, 0, ChunkTypes.Free, free.Position + size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, free.Size - size - StorageChunk.ChunkHeaderSize - StorageChunk.ChunkFooterSize, DateTime.UtcNow);
+                                info.UpdateChunk(newFree);
                                 chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, free.Position, size, DateTime.UtcNow) { Changing = true };
                                 info.AddChunk(chunk);
+                                Log($"Split free chunk {free} to chunk {chunk} and free {newFree}");
 
                                 // write out new free chunk header
-                                f.Position = free.Position;
-                                free.ToStorage(w);
-
-#if InvalidChunkDebug
-                                if (free.Size > 0)
-                                {
-                                    f.Position = free.Position + StorageChunk.ChunkHeaderSize + free.Size - 1;
-                                    f.WriteByte(83); // 'S' character
-                                }
-#endif
+                                f.Position = newFree.Position;
+                                newFree.ToStorage(w);
 
                                 f.Flush();
                             }
@@ -150,6 +146,7 @@ namespace BlobCache
                             var position = last.Position == 0 ? HeaderSize : last.Position + last.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize;
                             chunk = new StorageChunk(GetId(info.Chunks), userData, chunkType, position, size, DateTime.UtcNow) { Changing = true };
                             info.AddChunk(chunk);
+                            Log($"Add chunk {chunk}");
                             f.SetLength(position + StorageChunk.ChunkHeaderSize + size + StorageChunk.ChunkFooterSize);
                         }
 
@@ -252,6 +249,7 @@ namespace BlobCache
         /// </summary>
         public void Dispose()
         {
+            Log("Dispose");
             _mainLock?.Close();
             _mainLock = null;
             ConcurrencyHandler?.Dispose();
@@ -284,6 +282,8 @@ namespace BlobCache
 
                     _mainLock?.Close();
                     _mainLock = null;
+
+                    Log("Initialize");
 
                     Info.Refresh();
                     if (!Info.Exists)
@@ -530,23 +530,17 @@ namespace BlobCache
                             info.RemoveChunk(previousChunk);
                         }
 
-                        // Mark the chunk free
-                        f.Position = chunk.Position;
-                        chunk.ToStorage(w);
+                        // Mark the chunk changing while updating the file
+                        var freeChunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition, freeSize, DateTime.UtcNow);
+                        info.UpdateChunk(freeChunk);
 
-#if InvalidChunkDebug
-                        if (chunk.Size > 0)
-                        {
-                            f.Position = chunk.Position + StorageChunk.ChunkHeaderSize + chunk.Size - 1;
-                            f.WriteByte(82); // 'R' character
-                        }
-#endif
+                        // Mark the chunk free
+                        f.Position = freeChunk.Position;
+                        freeChunk.ToStorage(w);
 
                         f.Flush();
 
-                        // Mark the chunk changing while updating the file
-                        chunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition, freeSize, DateTime.UtcNow);
-                        info.UpdateChunk(chunk);
+                        Log($"Remove chunk {chunk} (previous: {previousChunk}, next: {nextChunk}), result: {freeChunk}");
 
                         info.RemovedVersion++;
                         WriteInfo(info);
@@ -630,6 +624,8 @@ namespace BlobCache
                     if (info.Initialized)
                         return;
 
+                    Log("Initialize info");
+
                     using (var f = OpenFile())
                     using (var br = new BinaryReader(f, Encoding.UTF8))
                     {
@@ -663,11 +659,18 @@ namespace BlobCache
             return false;
         }
 
+        [Conditional("DebugLogging")]
+        private void Log(string log)
+        {
+            Debug.WriteLine($"BlobStorage: {GetHashCode():x8} {log}");
+        }
+
         private void CreateEmptyBlobStorage()
         {
             using (var f = Info.Create())
             using (var w = new BinaryWriter(f, Encoding.UTF8))
             {
+                Log("New file created");
                 w.Write(ChunkTypes.Blob);
                 w.Write(1);
                 w.Write(Guid.NewGuid().ToByteArray());

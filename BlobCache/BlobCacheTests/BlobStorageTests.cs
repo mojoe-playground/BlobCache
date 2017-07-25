@@ -1,8 +1,10 @@
 ﻿namespace BlobCacheTests
 {
+    using System;
     using System.IO;
     using System.Linq;
     using System.Threading;
+    using System.Threading.Tasks;
     using BlobCache;
     using BlobCache.ConcurrencyModes;
     using Xunit;
@@ -73,6 +75,42 @@
                 var c4 = await s.AddChunk(ChunkTypes.Test, 14, data, CancellationToken.None);
                 Assert.Equal(c1.Id, c4.Id);
             }
+        }
+
+        [Fact]
+        public async void ConcurrencyAddAppDomain()
+        {
+            await ConcurrencyAdd<AppDomainConcurrencyHandler>();
+        }
+
+        [Fact]
+        public async void ConcurrencyAddSession()
+        {
+            await ConcurrencyAdd<SessionConcurrencyHandler>();
+        }
+
+        [Fact]
+        public async void ConcurrencyAppDomain()
+        {
+            await Concurrency<AppDomainConcurrencyHandler>();
+        }
+
+        [Fact]
+        public async void ConcurrencyRemoveAppDomain()
+        {
+            await ConcurrencyRemove<AppDomainConcurrencyHandler>();
+        }
+
+        [Fact]
+        public async void ConcurrencyRemoveSession()
+        {
+            await ConcurrencyRemove<SessionConcurrencyHandler>();
+        }
+
+        [Fact]
+        public async void ConcurrencySession()
+        {
+            await Concurrency<SessionConcurrencyHandler>();
         }
 
         [Fact]
@@ -273,6 +311,18 @@
         }
 
         [Fact]
+        public async void RepeatedAppDomain()
+        {
+            await Repeated<AppDomainConcurrencyHandler>();
+        }
+
+        [Fact]
+        public async void RepeatedSession()
+        {
+            await Repeated<SessionConcurrencyHandler>();
+        }
+
+        [Fact]
         public async void SpaceReuse()
         {
             using (var s = new BlobStorage("test.blob"))
@@ -354,6 +404,226 @@
                     Assert.Equal(data, ms.ToArray());
                     Assert.Equal(ms, res.First().Data);
                 }
+            }
+        }
+
+        private static async Task Concurrency<T>()
+            where T : ConcurrencyHandler, new()
+        {
+            File.Delete("concurrency.blob");
+
+            var rn = new Random();
+            using (var s = new BlobStorage("concurrency.blob"))
+            {
+                await s.Initialize<T>(CancellationToken.None);
+
+                for (uint j = 0; j < 50; j++)
+                    await s.AddChunk(ChunkTypes.Test, j, Enumerable.Range(0, rn.Next(500) + 500).Select(_ => (byte)rn.Next(256)).ToArray(), CancellationToken.None);
+
+                for (uint j = 0; j < 25; j++)
+                    await s.RemoveChunk(si => si.Chunks.Count == 0 ? (StorageChunk?)null : si.Chunks[rn.Next(si.Chunks.Count)], CancellationToken.None);
+            }
+
+            var counter = 0;
+            const int max = 100;
+
+            for (var i = 0; i < max; i++)
+            {
+                var t = new Thread(() =>
+                {
+                    try
+                    {
+                        var r = new Random();
+                        using (var s = new BlobStorage("concurrency.blob"))
+                        {
+                            s.Initialize<T>(CancellationToken.None).Wait();
+
+                            for (uint j = 0; j < 10; j++)
+                            {
+                                var op = r.Next(2);
+                                if (op == 0)
+                                    s.AddChunk(ChunkTypes.Test, j, Enumerable.Range(0, r.Next(500) + 500).Select(_ => (byte)r.Next(256)).ToArray(), CancellationToken.None).Wait();
+                                if (op == 1)
+                                    s.RemoveChunk(si => si.Chunks.Count == 0 ? (StorageChunk?)null : si.Chunks[r.Next(si.Chunks.Count)], CancellationToken.None).Wait();
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        Interlocked.Increment(ref counter);
+                    }
+                });
+                t.Start();
+                Thread.Sleep(100);
+            }
+
+            // ReSharper disable once LoopVariableIsNeverChangedInsideLoop
+            while (counter < max)
+                Thread.Sleep(100);
+
+            using (var s = new BlobStorage("concurrency.blob"))
+            {
+                Assert.True(await s.Initialize<T>(CancellationToken.None));
+            }
+        }
+
+
+        private static async Task ConcurrencyAdd<T>()
+            where T : ConcurrencyHandler, new()
+        {
+            File.Delete("concurrencyAdd.blob");
+
+            var rn = new Random();
+            using (var s = new BlobStorage("concurrencyAdd.blob"))
+            {
+                await s.Initialize<T>(CancellationToken.None);
+
+                for (uint j = 0; j < 50; j++)
+                    await s.AddChunk(ChunkTypes.Test, j, Enumerable.Range(0, rn.Next(500) + 500).Select(_ => (byte)rn.Next(256)).ToArray(), CancellationToken.None);
+
+                for (uint j = 0; j < 25; j++)
+                    await s.RemoveChunk(si => si.Chunks.Count == 0 ? (StorageChunk?)null : si.Chunks[rn.Next(si.Chunks.Count)], CancellationToken.None);
+            }
+
+            var counter = 0;
+            const int max = 100;
+
+            for (var i = 0; i < max; i++)
+            {
+                var t = new Thread(() =>
+                {
+                    try
+                    {
+                        var r = new Random();
+                        using (var s = new BlobStorage("concurrencyAdd.blob"))
+                        {
+                            s.Initialize<T>(CancellationToken.None).Wait();
+
+                            for (uint j = 0; j < 10; j++)
+                                s.AddChunk(ChunkTypes.Test, j, Enumerable.Range(0, r.Next(500) + 500).Select(_ => (byte)r.Next(256)).ToArray(), CancellationToken.None).Wait();
+                        }
+                    }
+                    finally
+                    {
+                        Interlocked.Increment(ref counter);
+                    }
+                });
+                t.Start();
+                Thread.Sleep(100);
+            }
+
+            // ReSharper disable once LoopVariableIsNeverChangedInsideLoop
+            while (counter < max)
+                Thread.Sleep(100);
+
+            using (var s = new BlobStorage("concurrencyAdd.blob"))
+            {
+                Assert.True(await s.Initialize<T>(CancellationToken.None));
+            }
+        }
+
+
+        private static async Task ConcurrencyRemove<T>()
+            where T : ConcurrencyHandler, new()
+        {
+            File.Delete("concurrencyRemove.blob");
+
+            var rn = new Random();
+            using (var s = new BlobStorage("concurrencyRemove.blob"))
+            {
+                await s.Initialize<T>(CancellationToken.None);
+
+                for (uint j = 0; j < 050; j++)
+                    await s.AddChunk(ChunkTypes.Test, j, Enumerable.Range(0, rn.Next(500) + 500).Select(_ => (byte)rn.Next(256)).ToArray(), CancellationToken.None);
+            }
+
+            var counter = 0;
+            const int max = 100;
+
+            for (var i = 0; i < max; i++)
+            {
+                var t = new Thread(() =>
+                {
+                    try
+                    {
+                        var r = new Random();
+                        using (var s = new BlobStorage("concurrencyRemove.blob"))
+                        {
+                            s.Initialize<T>(CancellationToken.None).Wait();
+
+                            for (uint j = 0; j < 10; j++)
+                                s.RemoveChunk(si => si.Chunks.Count == 0 ? (StorageChunk?)null : si.Chunks[r.Next(si.Chunks.Count)], CancellationToken.None).Wait();
+                        }
+                    }
+                    finally
+                    {
+                        Interlocked.Increment(ref counter);
+                    }
+                });
+                t.Start();
+                Thread.Sleep(100);
+            }
+
+            // ReSharper disable once LoopVariableIsNeverChangedInsideLoop
+            while (counter < max)
+                Thread.Sleep(100);
+
+            using (var s = new BlobStorage("concurrencyRemove.blob"))
+            {
+                Assert.True(await s.Initialize<T>(CancellationToken.None));
+            }
+        }
+
+        private static async Task Repeated<T>()
+            where T : ConcurrencyHandler, new()
+        {
+            File.Delete("repeated.blob");
+
+            var rn = new Random();
+            using (var s = new BlobStorage("repeated.blob"))
+            {
+                await s.Initialize<T>(CancellationToken.None);
+
+                for (uint j = 0; j < 50; j++)
+                    await s.AddChunk(ChunkTypes.Test, j, Enumerable.Range(0, rn.Next(500) + 500).Select(_ => (byte)rn.Next(256)).ToArray(), CancellationToken.None);
+
+                for (uint j = 0; j < 25; j++)
+                    await s.RemoveChunk(si => si.Chunks.Count == 0 ? (StorageChunk?)null : si.Chunks[rn.Next(si.Chunks.Count)], CancellationToken.None);
+            }
+
+            var counter = 0;
+            const int max = 100;
+
+            for (var i = 0; i < max; i++)
+                try
+                {
+                    var r = new Random();
+                    using (var s = new BlobStorage("repeated.blob"))
+                    {
+                        s.Initialize<T>(CancellationToken.None).Wait();
+
+                        for (uint j = 0; j < 10; j++)
+                        {
+                            var op = r.Next(2);
+                            if (op == 0)
+                                await s.AddChunk(ChunkTypes.Test, j, Enumerable.Range(0, r.Next(500) + 500).Select(_ => (byte)r.Next(256)).ToArray(), CancellationToken.None);
+                            if (op == 1)
+                                await s.RemoveChunk(si => si.Chunks.Count == 0 ? (StorageChunk?)null : si.Chunks[r.Next(si.Chunks.Count)], CancellationToken.None);
+                        }
+                    }
+                }
+                finally
+                {
+                    Interlocked.Increment(ref counter);
+                }
+
+            // ReSharper disable once LoopVariableIsNeverChangedInsideLoop
+            while (counter < max)
+                Thread.Sleep(100);
+
+            using (var s = new BlobStorage("repeated.blob"))
+            {
+                Assert.True(await s.Initialize<T>(CancellationToken.None));
             }
         }
     }

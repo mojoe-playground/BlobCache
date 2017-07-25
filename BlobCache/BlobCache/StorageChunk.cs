@@ -62,7 +62,7 @@
             var a = reader.ReadInt64();
             var crc = reader.ReadUInt16();
 
-            if (p + s > reader.BaseStream.Length)
+            if (p + ChunkHeaderSize + s + ChunkFooterSize > reader.BaseStream.Length)
                 throw new InvalidDataException("Chunk size points outside of stream");
 
             var chunk = new StorageChunk(i, d, t, p, s, a);
