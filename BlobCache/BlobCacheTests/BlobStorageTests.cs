@@ -325,6 +325,7 @@
         [Fact]
         public async void SpaceReuse()
         {
+            File.Delete("test.blob");
             using (var s = new BlobStorage("test.blob"))
             {
                 Assert.True(await s.Initialize<AppDomainConcurrencyHandler>(CancellationToken.None));
