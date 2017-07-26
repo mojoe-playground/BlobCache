@@ -1,5 +1,4 @@
-﻿
-//#define DebugLogging
+﻿//#define DebugLogging
 
 namespace BlobCache
 {
@@ -149,10 +148,10 @@ namespace BlobCache
                         }
 
                         using (var fr = f.Range(chunk.Position, lockSize, LockMode.Exclusive))
-                        using (var w = new BinaryWriter(fr, Encoding.UTF8, true))
+                        using (var w = new BinaryWriter(fr, Encoding.UTF8))
                         {
-                            if (f.Length < chunk.Position + lockSize)
-                                f.SetLength(chunk.Position + lockSize);
+                            if (fr.Stream.Length < chunk.Position + lockSize)
+                                fr.Stream.SetLength(chunk.Position + lockSize);
 
                             if (newFree.HasValue)
                             {
@@ -176,7 +175,7 @@ namespace BlobCache
                     try
                     {
                         using (var fr = f.Range(chunk.Position, lockSize, LockMode.Exclusive))
-                        using (var w = new BinaryWriter(fr, Encoding.UTF8, true))
+                        using (var w = new BinaryWriter(fr, Encoding.UTF8))
                         {
                             fr.Position = StorageChunk.ChunkHeaderSize;
 
@@ -562,7 +561,7 @@ namespace BlobCache
                         info.UpdateChunk(freeChunk);
 
                         using (var fr = f.Range(freeChunk.Position, freeSize + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, LockMode.Exclusive))
-                        using (var w = new BinaryWriter(fr, Encoding.UTF8, true))
+                        using (var w = new BinaryWriter(fr, Encoding.UTF8))
                         {
                             // Mark the chunk free
                             freeChunk.ToStorage(w);
@@ -632,7 +631,7 @@ namespace BlobCache
                 throw new NotSupportedException("Unknown file format (file too short)");
 
             using (var fr = _mainLock.Range(0, HeaderSize, LockMode.Shared))
-            using (var r = new BinaryReader(fr, Encoding.UTF8, true))
+            using (var r = new BinaryReader(fr, Encoding.UTF8))
             {
                 var blob = r.ReadInt32();
                 if (blob != ChunkTypes.Blob)
@@ -669,11 +668,11 @@ namespace BlobCache
                             {
                                 token.ThrowIfCancellationRequested();
                                 position = fr.Position;
-                                info.AddChunk(StorageChunk.FromStorage(br, true, f.Position));
+                                info.AddChunk(StorageChunk.FromStorage(br, true, fr.OriginalStreamPosition));
                             }
                             catch (InvalidDataException) when (TruncateOnChunkInitializationError)
                             {
-                                f.SetLength(position);
+                                f.SetLength(fr.Start + position);
                                 break;
                             }
                     }
@@ -763,7 +762,7 @@ namespace BlobCache
                 ushort crc = 0;
                 var res = new byte[target == null ? chunk.Size : Math.Min(chunk.Size, 64 * 1024)];
 
-                var diskChunk = StorageChunk.FromStorage(br, false, f.Position);
+                var diskChunk = StorageChunk.FromStorage(br, false, fr.OriginalStreamPosition);
                 if (diskChunk != chunk)
                     throw new InvalidDataException("Blob and concurrency data mismatch");
 

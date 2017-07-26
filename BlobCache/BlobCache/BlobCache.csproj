@@ -70,6 +70,7 @@
     <Compile Include="IKeyComparer.cs" />
     <Compile Include="CaseSensitiveKeyComparer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="RangeStream.cs" />
     <Compile Include="StorageChunk.cs" />
     <Compile Include="StorageInfo.cs" />
     <Compile Include="StorageStatistics.cs" />
