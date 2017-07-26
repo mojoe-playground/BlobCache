@@ -34,6 +34,8 @@
 // Original code: https://code.google.com/p/cityhash/
 //
 
+#define NET45
+
 using System;
 using System.Diagnostics;
 using System.Text;
