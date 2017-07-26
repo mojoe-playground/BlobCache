@@ -13,9 +13,19 @@ namespace BlobCache
     using ConcurrencyModes;
     using JetBrains.Annotations;
 
+    /// <summary>
+    ///     Blob storage class, storage data chunks in a blob
+    /// </summary>
     public class BlobStorage : IDisposable
     {
+        /// <summary>
+        ///     Blob header size
+        /// </summary>
         internal const int HeaderSize = 24;
+
+        /// <summary>
+        ///     Header version number
+        /// </summary>
         private const int LastVersion = 1;
 
         private FileStream _mainLock;
@@ -29,6 +39,9 @@ namespace BlobCache
             Info = new FileInfo(fileName);
         }
 
+        /// <summary>
+        ///     Frees allocated resources for the blob storage
+        /// </summary>
         ~BlobStorage()
         {
             Dispose();
@@ -51,8 +64,14 @@ namespace BlobCache
         [PublicAPI]
         public bool TruncateOnChunkInitializationError { get; set; }
 
+        /// <summary>
+        ///     Gets or sets the concurrency handler to use
+        /// </summary>
         private ConcurrencyHandler ConcurrencyHandler { get; set; }
 
+        /// <summary>
+        ///     Gets or sets the blob storage id
+        /// </summary>
         private Guid Id { get; set; }
 
         /// <summary>
@@ -581,6 +600,11 @@ namespace BlobCache
             }, token);
         }
 
+        /// <summary>
+        ///     Gathers statistics about the storage
+        /// </summary>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Blob statistics</returns>
         public Task<StorageStatistics> Statistics(CancellationToken token)
         {
             return Task.Run(async () =>
@@ -622,6 +646,9 @@ namespace BlobCache
             }, token);
         }
 
+        /// <summary>
+        ///     Validates the header of a blob storage file
+        /// </summary>
         private void CheckBlobStorageHeader()
         {
             _mainLock?.Close();
@@ -644,6 +671,11 @@ namespace BlobCache
             }
         }
 
+        /// <summary>
+        ///     Checks whether the storage info belonging to the blob storage is initialized and initializes it if it is not
+        /// </summary>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Task</returns>
         private Task CheckInitialization(CancellationToken token)
         {
             return Task.Run(() =>
@@ -686,12 +718,21 @@ namespace BlobCache
         }
 
         // ReSharper disable once UnusedParameter.Local
+        /// <summary>
+        ///     Checks whether the storage info is initialized
+        /// </summary>
+        /// <param name="info">Storage info to check</param>
+        /// <exception cref="InvalidOperationException">Storage not initialized</exception>
         private void CheckInitialized(StorageInfo info)
         {
             if (!info.Initialized)
                 throw new InvalidOperationException("Storage not initialized!");
         }
 
+        /// <summary>
+        ///     Closes the lock on the storage file
+        /// </summary>
+        /// <returns>False</returns>
         private bool CloseLock()
         {
             _mainLock?.Close();
@@ -699,6 +740,9 @@ namespace BlobCache
             return false;
         }
 
+        /// <summary>
+        ///     Creates a new empty blob storage file
+        /// </summary>
         private void CreateEmptyBlobStorage()
         {
             using (var f = Info.Create())
@@ -713,6 +757,11 @@ namespace BlobCache
             }
         }
 
+        /// <summary>
+        ///     Gets the next unused id by chunks for a new chunk
+        /// </summary>
+        /// <param name="chunks">List of chunks to check</param>
+        /// <returns>Free id</returns>
         private uint GetId(IReadOnlyList<StorageChunk> chunks)
         {
             var id = 1u;
@@ -725,6 +774,12 @@ namespace BlobCache
             return id;
         }
 
+        /// <summary>
+        ///     Locks the blob storage info
+        /// </summary>
+        /// <param name="timeout">Timeout</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Lock release object</returns>
         private IDisposable Lock(int timeout, CancellationToken token)
         {
             Log("Waiting for lock");
@@ -733,12 +788,22 @@ namespace BlobCache
             return res;
         }
 
+        /// <summary>
+        ///     Logs debug info
+        /// </summary>
+        /// <param name="log">Info to log</param>
         [Conditional("DebugLogging")]
         private void Log(string log)
         {
             Debug.WriteLine($"BlobStorage: {GetHashCode():x8} {log}");
         }
 
+        /// <summary>
+        ///     Opens the blob storege file stream
+        /// </summary>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Opened file stream</returns>
+        /// <remarks>Try to reinitialize storage if storage file not exists</remarks>
         private async Task<FileStream> Open(CancellationToken token)
         {
             Info.Refresh();
@@ -747,12 +812,31 @@ namespace BlobCache
             return OpenFile();
         }
 
+        /// <summary>
+        ///     Opens the blob storage file stream
+        /// </summary>
+        /// <returns>Opened file stream</returns>
+        /// <remarks>
+        ///     Use <see cref="Open" /> instead when not open for the <see cref="_mainLock" /> or in
+        ///     <see cref="Initialize{T}" />
+        /// </remarks>
         private FileStream OpenFile()
         {
             return new FileStream(Info.FullName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite, 1);
         }
 
-        private async Task<(StorageChunk, byte[], Stream)> ReadChunk(StorageChunk chunk, Stream target, CancellationToken token)
+        /// <summary>
+        ///     Reads a chunk from the storage
+        /// </summary>
+        /// <param name="chunk">Chunk to read</param>
+        /// <param name="target">Target stream</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Data in the chunk</returns>
+        /// <remarks>
+        ///     If <paramref name="target" /> is given it returns null instead of the read data, because the read data went to
+        ///     the <paramref name="target" />
+        /// </remarks>
+        private async Task<byte[]> ReadChunk(StorageChunk chunk, [CanBeNull] Stream target, CancellationToken token)
         {
             using (var f = await Open(token))
             using (var fr = f.Range(chunk.Position, chunk.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, LockMode.Shared))
@@ -784,14 +868,24 @@ namespace BlobCache
                 if (diskCrc != crc)
                     throw new InvalidDataException("Invalid data read from blob storage");
 
-                return (chunk, res, target);
+                return target == null ? res : null;
             }
         }
 
-        private Task ReadChunksInternal(Func<StorageInfo, IEnumerable<StorageChunk>> selector, Func<StorageChunk, Stream> streamCreator, Action<StorageChunk, byte[], Stream> resultProcessor, CancellationToken token)
+        /// <summary>
+        ///     Reads chunks from the storage
+        /// </summary>
+        /// <param name="selector">Select which chunks to read</param>
+        /// <param name="streamCreator">Gets the stream belonging to a read chunk if read to streams</param>
+        /// <param name="resultProcessor">Activated when a chunk is read</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Task</returns>
+        private Task ReadChunksInternal([NotNull] Func<StorageInfo, IEnumerable<StorageChunk>> selector, [CanBeNull] Func<StorageChunk, Stream> streamCreator, [NotNull] Action<StorageChunk, byte[], Stream> resultProcessor, CancellationToken token)
         {
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
+            if (resultProcessor == null)
+                throw new ArgumentNullException(nameof(resultProcessor));
 
             return Task.Run(async () =>
             {
@@ -825,13 +919,10 @@ namespace BlobCache
                     {
                         token.ThrowIfCancellationRequested();
 
-                        Stream stream = null;
-
-                        if (streamCreator != null)
-                            stream = streamCreator.Invoke(r);
+                        var stream = streamCreator?.Invoke(r);
 
                         var res = await ReadChunk(r, stream, token);
-                        resultProcessor(res.Item1, res.Item2, res.Item3);
+                        resultProcessor(r, res, stream);
                     }
                 }
                 finally
@@ -860,11 +951,19 @@ namespace BlobCache
             }, token);
         }
 
+        /// <summary>
+        ///     Reads the storage info
+        /// </summary>
+        /// <returns>Storage info</returns>
         private StorageInfo ReadInfo()
         {
             return ConcurrencyHandler.ReadInfo();
         }
 
+        /// <summary>
+        ///     Writes the storage info
+        /// </summary>
+        /// <param name="info">Storage info</param>
         private void WriteInfo(StorageInfo info)
         {
             ConcurrencyHandler.WriteInfo(info);

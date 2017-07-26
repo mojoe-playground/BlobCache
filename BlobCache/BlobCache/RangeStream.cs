@@ -2,7 +2,11 @@
 {
     using System;
     using System.IO;
+    using JetBrains.Annotations;
 
+    /// <summary>
+    ///     Range stream
+    /// </summary>
     public class RangeStream : Stream
     {
         private readonly IDisposable _locker;
@@ -13,6 +17,13 @@
         private int _writeLength;
         private long _writePos = -1;
 
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="RangeStream" /> class
+        /// </summary>
+        /// <param name="stream">Parent stream</param>
+        /// <param name="position">Range starting position</param>
+        /// <param name="length">Range length</param>
+        [PublicAPI]
         public RangeStream(Stream stream, long position, long length)
         {
             Stream = stream;
@@ -24,6 +35,14 @@
             CanWrite = Stream.CanWrite;
         }
 
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="RangeStream" /> class
+        /// </summary>
+        /// <param name="locker">Stream unlocker to unlock the range in the stream when disposed</param>
+        /// <param name="stream">Parent stream</param>
+        /// <param name="position">Range starting position</param>
+        /// <param name="length">Range length</param>
+        /// <param name="canWrite">Indicating whether the range can be written</param>
         internal RangeStream(IDisposable locker, Stream stream, long position, long length, bool canWrite)
         {
             _locker = locker;
@@ -36,21 +55,41 @@
             CanWrite = Stream.CanWrite && canWrite;
         }
 
+        /// <inheritdoc />
         public override bool CanRead { get; }
+
+        /// <inheritdoc />
         public override bool CanSeek { get; }
+
+        /// <inheritdoc />
         public override bool CanWrite { get; }
+
+        /// <inheritdoc />
         public override long Length { get; }
+
+        /// <summary>
+        ///     Gets the position in the original stream
+        /// </summary>
         public long OriginalStreamPosition => Start + _internalPosition;
 
+        /// <inheritdoc />
         public override long Position
         {
             get => _internalPosition;
             set => Seek(value, SeekOrigin.Begin);
         }
 
+        /// <summary>
+        ///     Gets the starting point in the original stream
+        /// </summary>
         public long Start { get; }
+
+        /// <summary>
+        ///     Gets the original stream
+        /// </summary>
         public Stream Stream { get; }
 
+        /// <inheritdoc />
         public override void Flush()
         {
             FlushWrite();
@@ -58,6 +97,7 @@
                 Stream.Flush();
         }
 
+        /// <inheritdoc />
         public override int Read(byte[] buffer, int offset, int count)
         {
             FlushWrite();
@@ -83,6 +123,7 @@
             return maxCount;
         }
 
+        /// <inheritdoc />
         public override long Seek(long offset, SeekOrigin origin)
         {
             long targetPosition = 0;
@@ -109,11 +150,14 @@
             return _internalPosition;
         }
 
+        /// <inheritdoc />
+        /// <exception cref="NotSupportedException">Setting the length is not supported</exception>
         public override void SetLength(long value)
         {
             throw new NotSupportedException();
         }
 
+        /// <inheritdoc />
         public override void Write(byte[] buffer, int offset, int count)
         {
             FlushRead();
@@ -146,6 +190,7 @@
             _internalPosition += maxCount;
         }
 
+        /// <inheritdoc />
         protected override void Dispose(bool disposing)
         {
             Flush();
@@ -154,12 +199,18 @@
             _buffer = null;
         }
 
+        /// <summary>
+        ///     Flushes the read buffer
+        /// </summary>
         private void FlushRead()
         {
             _readPos = -1;
             _readLength = 0;
         }
 
+        /// <summary>
+        ///     Flushes the write buffer
+        /// </summary>
         private void FlushWrite()
         {
             if (_writePos < 0)

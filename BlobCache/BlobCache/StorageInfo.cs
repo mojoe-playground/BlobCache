@@ -6,6 +6,7 @@
     using System.IO;
     using System.Linq;
     using System.Text;
+    using JetBrains.Annotations;
 
     /// <summary>
     ///     Information about storage chunks
@@ -35,6 +36,7 @@
         ///     Gets the data version since storage initialization
         /// </summary>
         /// <remarks>Increased when a chunk is added to or removed from the storage</remarks>
+        [PublicAPI]
         public ulong Version => AddedVersion + RemovedVersion;
 
         /// <summary>
@@ -127,10 +129,14 @@
             ChunkDictionary[chunk.Id] = index;
         }
 
+        /// <summary>
+        ///     Stops debugging when an index is outside of the current chunk lists
+        /// </summary>
+        /// <param name="index">Index to check</param>
         [Conditional("DEBUG")]
         private void FailIndex(int index)
         {
-            if (index < 0 || index>=ChunkList.Count && Debugger.IsAttached)
+            if (index < 0 || index >= ChunkList.Count && Debugger.IsAttached)
                 Debugger.Break();
         }
 

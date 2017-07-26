@@ -9,6 +9,9 @@
     using System.Threading;
     using JetBrains.Annotations;
 
+    /// <summary>
+    ///     Concurrency handler in a single terminal session
+    /// </summary>
     public class SessionConcurrencyHandler : ConcurrencyHandler
     {
         private readonly object _locker = new object();
@@ -16,13 +19,22 @@
 
         private GlobalLockData _rwl;
 
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="SessionConcurrencyHandler" /> class
+        /// </summary>
         public SessionConcurrencyHandler()
         {
             Timeout = 30000;
         }
 
+        /// <summary>
+        ///     Gets or sets a value indicating whether the locks are global or only for the current terminal session
+        /// </summary>
         protected bool IsGlobal { get; set; } = false;
 
+        /// <summary>
+        ///     Gets the lock data used for manage the storage
+        /// </summary>
         private GlobalLockData LockData
         {
             get
@@ -40,6 +52,9 @@
             }
         }
 
+        /// <summary>
+        ///     Gets the memory mapped file used for storage info synchronization
+        /// </summary>
         private MemoryMappedFile Memory
         {
             get
@@ -57,11 +72,13 @@
             }
         }
 
+        /// <inheritdoc />
         public override IDisposable Lock(int timeout, CancellationToken token)
         {
-            return LockData.WriteLock(timeout, token);
+            return LockData.Lock(timeout, token);
         }
 
+        /// <inheritdoc />
         public override StorageInfo ReadInfo()
         {
             using (var s = Memory.CreateViewStream())
@@ -70,16 +87,19 @@
             }
         }
 
+        /// <inheritdoc />
         public override void SignalReadFinish()
         {
             LockData.ReadEvent.Set();
         }
 
+        /// <inheritdoc />
         public override void SignalWaitRequired()
         {
             LockData.ReadEvent.Reset();
         }
 
+        /// <inheritdoc />
         public override void WaitForReadFinish(CancellationToken token)
         {
             while (true)
@@ -90,6 +110,7 @@
             }
         }
 
+        /// <inheritdoc />
         public override void WriteInfo(StorageInfo info)
         {
             using (var s = Memory.CreateViewStream())
@@ -98,6 +119,10 @@
             }
         }
 
+        /// <summary>
+        ///     Creates the memory mapped file used for storage info synchronization
+        /// </summary>
+        /// <returns>Memory mapped file</returns>
         protected virtual MemoryMappedFile CreateMemoryMappedFile()
         {
             var security = new MemoryMappedFileSecurity();
@@ -107,6 +132,7 @@
             return MemoryMappedFile.CreateOrOpen($"{(IsGlobal ? "Global\\" : "")}BlobStorage-{Id}-Info", 25 * 1024 * 1024, MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.None, security, HandleInheritability.None);
         }
 
+        /// <inheritdoc />
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
@@ -117,10 +143,18 @@
             _rwl = null;
         }
 
+        /// <summary>
+        ///     Contains data used for locking a storage
+        /// </summary>
         private class GlobalLockData : IDisposable
         {
             private readonly Mutex _mutex;
 
+            /// <summary>
+            ///     Initializes a new instance of the <see cref="GlobalLockData" /> class
+            /// </summary>
+            /// <param name="id">Storage id</param>
+            /// <param name="global">Indicating whether to use global or terminal session specific names</param>
             public GlobalLockData(Guid id, bool global)
             {
                 var allowEveryoneRule = new MutexAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), MutexRights.FullControl, AccessControlType.Allow);
@@ -135,16 +169,28 @@
                 ReadEvent = new EventWaitHandle(true, EventResetMode.ManualReset, $"{(global ? "Global\\" : "")}BlobStorage-{id}-ReadSignal", out _, eventSecurity);
             }
 
+            /// <summary>
+            ///     Gets the read event synchronization handle
+            /// </summary>
             public EventWaitHandle ReadEvent { get; }
 
+            /// <summary>
+            ///     Releases created handlers
+            /// </summary>
             public void Dispose()
             {
                 _mutex.Dispose();
                 ReadEvent.Dispose();
             }
 
+            /// <summary>
+            ///     Locks the storage info
+            /// </summary>
+            /// <param name="timeout">Timeout</param>
+            /// <param name="token">Cancellation token</param>
+            /// <returns>Lock</returns>
             [PublicAPI]
-            public IDisposable WriteLock(int timeout, CancellationToken token)
+            public IDisposable Lock(int timeout, CancellationToken token)
             {
                 var sw = new Stopwatch();
                 sw.Start();
@@ -161,15 +207,25 @@
                 return new LockRelease(_mutex);
             }
 
+            /// <summary>
+            ///     Disposable for lock release
+            /// </summary>
             private class LockRelease : IDisposable
             {
                 private readonly Mutex _mutex;
 
+                /// <summary>
+                ///     Initializes a new instance of the <see cref="LockRelease" /> clss
+                /// </summary>
+                /// <param name="mutex">Mutex to release</param>
                 public LockRelease(Mutex mutex)
                 {
                     _mutex = mutex;
                 }
 
+                /// <summary>
+                ///     Releases the lock held
+                /// </summary>
                 public void Dispose()
                 {
                     _mutex?.ReleaseMutex();

@@ -1,10 +1,10 @@
 ﻿namespace BlobCache
 {
-    using System;
     /// <summary>
-    /// Crc16 calculation
+    ///     Crc16 calculation
     /// </summary>
-    /// <remarks>Based on http://www.sanity-free.com/134/standard_crc_16_in_csharp.html
+    /// <remarks>
+    ///     Based on http://www.sanity-free.com/134/standard_crc_16_in_csharp.html
     /// </remarks>
     internal static class Crc16
     {
@@ -29,8 +29,24 @@
             }
         }
 
-        public static ushort ComputeChecksum(byte[] bytes) => ComputeChecksum(bytes, bytes.Length, 0);
+        /// <summary>
+        ///     Calculates 16bit CRC for the given bytes
+        /// </summary>
+        /// <param name="bytes">Bytes to check</param>
+        /// <returns>16bit CRC</returns>
+        public static ushort ComputeChecksum(byte[] bytes)
+        {
+            return ComputeChecksum(bytes, bytes.Length, 0);
+        }
 
+        /// <summary>
+        ///     Calculates 16bit CRC for the given bytes
+        /// </summary>
+        /// <param name="bytes">Bytes to check</param>
+        /// <param name="length">Number of bytes to check</param>
+        /// <param name="crc">Starting CRC</param>
+        /// <returns>16bit CRC</returns>
+        /// <remarks>Call with a CRC from a previous ComputeChecksum call to continue calculating CRC if data is buffered</remarks>
         public static ushort ComputeChecksum(byte[] bytes, int length, ushort crc)
         {
             for (var i = 0; i < length; i++)
@@ -40,12 +56,6 @@
             }
 
             return crc;
-        }
-
-        public static byte[] ComputeChecksumBytes(byte[] bytes)
-        {
-            var crc = ComputeChecksum(bytes);
-            return BitConverter.GetBytes(crc);
         }
     }
 }

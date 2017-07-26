@@ -12,8 +12,14 @@
     using ConcurrencyModes;
     using JetBrains.Annotations;
 
+    /// <summary>
+    ///     Blob cache
+    /// </summary>
     public class Cache : IDisposable
     {
+        /// <summary>
+        ///     Heads cache
+        /// </summary>
         private readonly Dictionary<string, (uint Hash, List<CacheHead> Heads)> _headCache = new Dictionary<string, (uint, List<CacheHead>)>();
 
         /// <summary>
@@ -22,7 +28,14 @@
         /// <remarks>Used in tests to simulate old data in storages</remarks>
         internal Func<DateTime> CleanupTime = () => DateTime.UtcNow;
 
+        /// <summary>
+        ///     Storage AddedVersion the heads cache belongs to
+        /// </summary>
         private ulong _headCacheAddedVersion;
+
+        /// <summary>
+        ///     Storage RemovedVersion the heads cache belongs to
+        /// </summary>
         private ulong _headCacheRemovedVersion;
 
         /// <summary>
@@ -65,6 +78,9 @@
             KeyComparer = keyComparer ?? throw new ArgumentNullException(nameof(keyComparer));
         }
 
+        /// <summary>
+        ///     Cleans up used resources
+        /// </summary>
         ~Cache()
         {
             Dispose();
@@ -106,10 +122,19 @@
         [PublicAPI]
         public bool TruncateOnChunkInitializationError { get; set; }
 
+        /// <summary>
+        ///     Gets a value indicating whether cleanup needed because storage was already initialized when the constructor called
+        /// </summary>
         private bool CleanupNeeded { get; }
 
+        /// <summary>
+        ///     Gets the comparer to compare keys
+        /// </summary>
         private IKeyComparer KeyComparer { get; }
 
+        /// <summary>
+        ///     Gets the blob storage
+        /// </summary>
         private BlobStorage Storage { get; }
 
         /// <summary>
@@ -489,6 +514,11 @@
             return new CacheStatistics { FileSize = storageStatistics.FileSize, UsedSpace = storageStatistics.UsedSpace + storageStatistics.Overhead, FreeSpace = storageStatistics.FreeSpace, Overhead = storageStatistics.Overhead + heads.Sum(h => h.HeadChunk.Size) + heads.Sum(h => h.ValidChunks.Count * DataHead.DataHeadSize), CompressionRatio = heads.Count == 0 ? 0 : 1.0 - heads.Average(h => h.ValidChunks.Sum(c => c.Size - DataHead.DataHeadSize) / (double)h.Length), EntriesSize = heads.Sum(h => h.Length), NumberOfEntries = heads.Count, StorageRatio = heads.Count == 0 ? 0 : heads.Average(h => (h.HeadChunk.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize + h.ValidChunks.Sum(c => c.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize)) / (double)h.Length) };
         }
 
+        /// <summary>
+        ///     Decodes a data chunk
+        /// </summary>
+        /// <param name="data">Data to decode</param>
+        /// <returns>Decoded data</returns>
         private static byte[] Decode(byte[] data)
         {
             var head = DataHead.ReadFromByteArray(data);
@@ -521,6 +551,12 @@
             }
         }
 
+        /// <summary>
+        ///     Encodes a data chunk
+        /// </summary>
+        /// <param name="buffer">Data to encode</param>
+        /// <param name="head">Data head</param>
+        /// <returns>Encoded data</returns>
         private static byte[] Encode(byte[] buffer, DataHead head)
         {
             switch (head.Compression)
@@ -551,11 +587,28 @@
             }
         }
 
+        /// <summary>
+        ///     Gets the public info from a cache head
+        /// </summary>
+        /// <param name="head">Cache head</param>
+        /// <returns>Public info</returns>
         private static CacheEntryInfo InfoFromHead(CacheHead head)
         {
             return new CacheEntryInfo { Added = head.HeadChunk.Added };
         }
 
+        /// <summary>
+        ///     Gets an entry from the cache with extra information
+        /// </summary>
+        /// <param name="key">Entry key to get</param>
+        /// <param name="initializer">Gives the entry size to the caller</param>
+        /// <param name="processor">Processes a chunk of data</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Entry info</returns>
+        /// <remarks>
+        ///     If the data is found then the actions called in the following order: initializer with the entry size,
+        ///     processor with the first chunk ... processor with the last chunk
+        /// </remarks>
         private async Task<CacheEntryInfo> GetWithInfo(string key, Action<int> initializer, Action<byte[]> processor, CancellationToken token)
         {
             var hash = KeyComparer.GetHash(key);
@@ -586,7 +639,13 @@
             return InfoFromHead(head);
         }
 
-        private async Task<List<CacheHead>> Heads(string key, CancellationToken token)
+        /// <summary>
+        ///     Gets the heads belonging to a cache key
+        /// </summary>
+        /// <param name="key">Cache key to check or null for all the heads</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>List of cache heads found</returns>
+        private async Task<List<CacheHead>> Heads([CanBeNull] string key, CancellationToken token)
         {
             if (key == null)
                 key = string.Empty;
@@ -677,10 +736,16 @@
             return res;
         }
 
+        /// <summary>
+        ///     Gets the last added cache entry for a given key with valid data
+        /// </summary>
+        /// <param name="key">Key of the cache entry to get</param>
+        /// <param name="token">Cancellation token</param>
+        /// <returns>Cache head belonging to the key</returns>
         private async Task<CacheHead> ValidHead(string key, CancellationToken token)
         {
             var n = DateTime.UtcNow;
-            return (await Heads(key, token)).LastOrDefault(h => h.HeadChunk.Type == ChunkTypes.Head && h.Chunks.Count == h.ValidChunks.Count && h.TimeToLive > n);
+            return (await Heads(key, token)).Where(h => h.HeadChunk.Type == ChunkTypes.Head && h.Chunks.Count == h.ValidChunks.Count && h.TimeToLive > n).OrderByDescending(h => h.HeadChunk.Added).FirstOrDefault();
         }
     }
 }
