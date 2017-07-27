@@ -205,7 +205,7 @@ namespace BlobCache
                             while (remaining > 0)
                             {
                                 var bytesRead = await data.ReadAsync(buffer, 0, (int)Math.Min(remaining, buffer.Length), token).ConfigureAwait(false);
-                                crc = Crc16.ComputeChecksum(buffer, bytesRead, crc);
+                                crc = Crc16.ComputeChecksum(buffer, 0, bytesRead, crc);
                                 if (bytesRead != 0)
                                     await fr.WriteAsync(buffer, 0, bytesRead, token).ConfigureAwait(false);
                                 else
@@ -852,15 +852,18 @@ namespace BlobCache
 
                 var position = 0;
                 var read = 1;
+                var bufferPosition = 0;
 
                 while (position < chunk.Size && read != 0)
                 {
-                    read = await fr.ReadAsync(res, 0, (int)Math.Min(res.Length, chunk.Size - position), token);
+                    read = await fr.ReadAsync(res, bufferPosition, (int)Math.Min(res.Length, chunk.Size - position), token);
                     position += read;
-                    crc = Crc16.ComputeChecksum(res, read, crc);
+                    crc = Crc16.ComputeChecksum(res, bufferPosition, read, crc);
 
                     if (target != null)
                         await target.WriteAsync(res, 0, read, token);
+                    else
+                        bufferPosition += read;
                 }
 
                 var diskCrc = br.ReadUInt16();

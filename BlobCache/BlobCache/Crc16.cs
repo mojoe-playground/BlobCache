@@ -36,20 +36,21 @@
         /// <returns>16bit CRC</returns>
         public static ushort ComputeChecksum(byte[] bytes)
         {
-            return ComputeChecksum(bytes, bytes.Length, 0);
+            return ComputeChecksum(bytes, 0, bytes.Length, 0);
         }
 
         /// <summary>
         ///     Calculates 16bit CRC for the given bytes
         /// </summary>
         /// <param name="bytes">Bytes to check</param>
+        /// <param name="offset">Offset in the array</param>
         /// <param name="length">Number of bytes to check</param>
         /// <param name="crc">Starting CRC</param>
         /// <returns>16bit CRC</returns>
         /// <remarks>Call with a CRC from a previous ComputeChecksum call to continue calculating CRC if data is buffered</remarks>
-        public static ushort ComputeChecksum(byte[] bytes, int length, ushort crc)
+        public static ushort ComputeChecksum(byte[] bytes, int offset, int length, ushort crc)
         {
-            for (var i = 0; i < length; i++)
+            for (var i = offset; i < offset + length; i++)
             {
                 var index = (byte)(crc ^ bytes[i]);
                 crc = (ushort)((crc >> 8) ^ Table[index]);
