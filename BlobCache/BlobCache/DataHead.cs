@@ -1,6 +1,5 @@
 ﻿namespace BlobCache
 {
-    using System;
     using System.IO;
 
     /// <summary>
@@ -60,26 +59,13 @@
         }
 
         /// <summary>
-        ///     Creates and write the data chunk header
-        /// </summary>
-        /// <param name="replacementCompression">Indicates whether use a different compression than specified</param>
-        /// <returns>Header byte array</returns>
-        private byte[] Write(DataCompression? replacementCompression)
-        {
-            var res = new byte[] { DataHeadSize };
-            res[0] = replacementCompression.HasValue ? (byte)replacementCompression.Value : (byte)Compression;
-            return res;
-        }
-
-        /// <summary>
         ///     Writes the header to a byte array
         /// </summary>
         /// <param name="data">Buffer where the header should be written</param>
         /// <param name="replacementCompression">Indicates whether use a different compression than specified</param>
         public void WriteToByteArray(byte[] data, DataCompression? replacementCompression)
         {
-            var head = Write(replacementCompression);
-            Array.Copy(head, data, head.Length);
+            data[0] = replacementCompression.HasValue ? (byte)replacementCompression.Value : (byte)Compression;
         }
 
         /// <summary>
@@ -89,8 +75,7 @@
         /// <param name="replacementCompression">Indicates whether use a different compression than specified</param>
         public void WriteToStream(Stream data, DataCompression? replacementCompression)
         {
-            var head = Write(replacementCompression);
-            data.Write(head, 0, head.Length);
+            data.WriteByte(replacementCompression.HasValue ? (byte)replacementCompression.Value : (byte)Compression);
         }
     }
 }
