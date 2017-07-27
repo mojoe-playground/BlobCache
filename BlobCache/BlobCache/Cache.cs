@@ -205,12 +205,13 @@
                     readPosition += read;
                 }
 
-                buffer = Encode(buffer, new DataHead(CanCompress ? DataCompression.Deflate : DataCompression.None));
+                using (var stream = Encode(buffer, new DataHead(CanCompress ? DataCompression.Deflate : DataCompression.None)))
+                {
+                    var chunk = await Storage.AddChunk(ChunkTypes.Data, hash, stream, token);
 
-                var chunk = await Storage.AddChunk(ChunkTypes.Data, hash, buffer, token);
-
-                remaining -= len;
-                ids.Add(chunk.Id);
+                    remaining -= len;
+                    ids.Add(chunk.Id);
+                }
             }
 
             // Save header
@@ -220,7 +221,8 @@
             {
                 header.ToStream(w);
 
-                await Storage.AddChunk(ChunkTypes.Head, hash, ms.ToArray(), token);
+                ms.Position = 0;
+                await Storage.AddChunk(ChunkTypes.Head, hash, ms, token);
             }
 
             // Remove old heads
@@ -365,7 +367,13 @@
             var success = false;
             var info = await GetWithInfo(key,
                 l => { success = true; },
-                d => { target.Write(d, 0, d.Length); },
+                d =>
+                {
+                    using (d)
+                    {
+                        d.CopyTo(target);
+                    }
+                },
                 token);
 
             return (success, info);
@@ -387,8 +395,15 @@
                 l => { result = new byte[l]; },
                 d =>
                 {
-                    Array.Copy(d, 0, result, position, d.Length);
-                    position += d.Length;
+                    using (d)
+                    {
+                        var read = 1;
+                        while (read != 0)
+                        {
+                            read = d.Read(result, position, result.Length - position);
+                            position += read;
+                        }
+                    }
                 },
                 token);
 
@@ -519,32 +534,21 @@
         /// </summary>
         /// <param name="data">Data to decode</param>
         /// <returns>Decoded data</returns>
-        private static byte[] Decode(byte[] data)
+        private static Stream Decode(byte[] data)
         {
+            // Returns stream instead of byte[] because its one less byte[] allocation
+            // Uses byte[] parameter instead of stream because stream would be MemoryStream and it would reallocate it's buffer, so it would be slower
+
             var head = DataHead.ReadFromByteArray(data);
 
             switch (head.Compression)
             {
                 case DataCompression.None:
-                    var res = new byte[data.Length - head.Size];
-                    Array.Copy(data, head.Size, res, 0, res.Length);
-                    return res;
+                    return new MemoryStream(data, head.Size, data.Length - head.Size, false);
 
                 case DataCompression.Deflate:
-                    using (var input = new MemoryStream(data))
-                    {
-                        input.Position = head.Size;
-
-                        using (var output = new MemoryStream())
-                        {
-                            using (var dstream = new DeflateStream(input, CompressionMode.Decompress))
-                            {
-                                dstream.CopyTo(output);
-                            }
-
-                            return output.ToArray();
-                        }
-                    }
+                    var input = new MemoryStream(data) { Position = head.Size };
+                    return new DeflateStream(input, CompressionMode.Decompress);
 
                 default:
                     throw new InvalidOperationException("Invalid cache compression method");
@@ -557,16 +561,19 @@
         /// <param name="buffer">Data to encode</param>
         /// <param name="head">Data head</param>
         /// <returns>Encoded data</returns>
-        private static byte[] Encode(byte[] buffer, DataHead head)
+        private static Stream Encode(byte[] buffer, DataHead head)
         {
+            // This method returns a stream instead of byte[] so we will get one less byte[] allocation if deflating
+
             switch (head.Compression)
             {
                 case DataCompression.None:
                     head.WriteToByteArray(buffer, null);
-                    return buffer;
+                    return new MemoryStream(buffer);
 
                 case DataCompression.Deflate:
-                    using (var output = new MemoryStream())
+                    var output = new MemoryStream();
+                    try
                     {
                         head.WriteToStream(output, null);
                         using (var dstream = new DeflateStream(output, CompressionLevel.Optimal, true))
@@ -574,16 +581,25 @@
                             dstream.Write(buffer, DataHead.DataHeadSize, buffer.Length - DataHead.DataHeadSize);
                         }
 
+                        output.Position = 0;
                         if (output.Length < buffer.Length)
-                            return output.ToArray();
+                            return output;
+
+                        output.Close();
+
+                    }
+                    catch
+                    {
+                        output.Close();
+                        throw;
                     }
 
                     head.WriteToByteArray(buffer, DataCompression.None);
-                    return buffer;
+                    return new MemoryStream(buffer);
 
                 default:
                     head.WriteToByteArray(buffer, DataCompression.None);
-                    return buffer;
+                    return new MemoryStream(buffer);
             }
         }
 
@@ -609,7 +625,7 @@
         ///     If the data is found then the actions called in the following order: initializer with the entry size,
         ///     processor with the first chunk ... processor with the last chunk
         /// </remarks>
-        private async Task<CacheEntryInfo> GetWithInfo(string key, Action<int> initializer, Action<byte[]> processor, CancellationToken token)
+        private async Task<CacheEntryInfo> GetWithInfo(string key, Action<int> initializer, Action<Stream> processor, CancellationToken token)
         {
             var hash = KeyComparer.GetHash(key);
             var head = await ValidHead(key, token);

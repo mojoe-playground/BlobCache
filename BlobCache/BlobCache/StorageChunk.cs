@@ -99,11 +99,12 @@
             Crc = 0;
             Added = DateTime.MinValue;
 
-            using (var ms = new MemoryStream())
+            // Use fixed size buffer so we don't need to call ToArray() on the stream, it will be one less byte[] allocation
+            using (var ms = new MemoryStream(new byte[ChunkHeaderSize - 2], 0, ChunkHeaderSize - 2, true, true))
             using (var bw = new BinaryWriter(ms))
             {
                 ToStorage(bw, false, true);
-                Crc = Crc16.ComputeChecksum(ms.ToArray());
+                Crc = Crc16.ComputeChecksum(ms.GetBuffer());
             }
         }
 
