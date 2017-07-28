@@ -52,6 +52,21 @@
         }
 
         [Fact]
+        public async void AddTtl()
+        {
+            File.Delete("cache.blob");
+            using (var c = new Cache("cache.blob"))
+            {
+                Assert.True(await c.Initialize(CancellationToken.None));
+
+                await c.Add("xunit.core.xml", DateTime.UtcNow.Add(TimeSpan.FromSeconds(3)), File.ReadAllBytes("xunit.core.xml"), CancellationToken.None);
+                Assert.Equal(File.ReadAllBytes("xunit.core.xml"), await c.Get("xunit.core.xml", CancellationToken.None));
+                Thread.Sleep(5000);
+                Assert.Null(await c.Get("xunit.core.xml", CancellationToken.None));
+            }
+        }
+
+        [Fact]
         public async void Compress()
         {
             File.Delete("cache.blob");
