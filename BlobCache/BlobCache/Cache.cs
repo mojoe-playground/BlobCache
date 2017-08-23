@@ -38,6 +38,8 @@
         /// </summary>
         private ulong _headCacheRemovedVersion;
 
+        private TaskScheduler _scheduler = TaskScheduler.Default;
+
         /// <summary>
         ///     Initializes a new instance of the <see cref="Cache" /> class
         /// </summary>
@@ -116,17 +118,25 @@
         public bool RemoveInvalidCache { get; set; }
 
         /// <summary>
+        ///     Gets or sets the task scheduler to use for scheduling tasks
+        /// </summary>
+        [PublicAPI]
+        public TaskScheduler Scheduler
+        {
+            get => _scheduler;
+            set
+            {
+                _scheduler = value;
+                Storage.Scheduler = value;
+            }
+        }
+
+        /// <summary>
         ///     Gets or sets a value indicating whether initialization should fail or blob storage should be truncated if a chunk
         ///     loading fail at initialization
         /// </summary>
         [PublicAPI]
         public bool TruncateOnChunkInitializationError { get; set; }
-
-        /// <summary>
-        /// Gets or sets the task scheduler to use for scheduling tasks
-        /// </summary>
-        [PublicAPI]
-        public TaskScheduler Scheduler { get; set; } = TaskScheduler.Default;
 
         /// <summary>
         ///     Gets a value indicating whether cleanup needed because storage was already initialized when the constructor called
@@ -313,7 +323,7 @@
 
                 // Cut excess space at the storage end again
                 await Storage.CutBackPadding(token);
-            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
+            }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
         /// <summary>
@@ -592,7 +602,6 @@
                             return output;
 
                         output.Close();
-
                     }
                     catch
                     {

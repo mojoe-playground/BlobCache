@@ -58,6 +58,12 @@ namespace BlobCache
         public bool IsInitialized { get; private set; }
 
         /// <summary>
+        ///     Gets or sets the task scheduler to use for scheduling tasks
+        /// </summary>
+        [PublicAPI]
+        public TaskScheduler Scheduler { get; set; } = TaskScheduler.Default;
+
+        /// <summary>
         ///     Gets or sets a value indicating whether initialization should fail or blob storage should be truncated if a chunk
         ///     loading fail at initialization
         /// </summary>
@@ -244,7 +250,7 @@ namespace BlobCache
                     }
                 }
                 return chunk;
-            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
+            }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
         /// <summary>
@@ -285,7 +291,7 @@ namespace BlobCache
                         WriteInfo(info);
                     }
                 }
-            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
+            }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
         /// <summary>
@@ -597,7 +603,7 @@ namespace BlobCache
                 }
 
                 return true;
-            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
+            }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
         /// <summary>
@@ -624,7 +630,7 @@ namespace BlobCache
                     FreeSpace = free.Sum(c => c.Size),
                     FileSize = Info.Length
                 };
-            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
+            }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
         /// <summary>
@@ -643,7 +649,7 @@ namespace BlobCache
                     CheckInitialized(info);
                     return info.Chunks;
                 }
-            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current);
+            }, token, TaskCreationOptions.DenyChildAttach, Scheduler);
         }
 
         /// <summary>
@@ -714,7 +720,7 @@ namespace BlobCache
                 }
 
                 FreshlyInitialized = true;
-            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current);
+            }, token, TaskCreationOptions.DenyChildAttach, Scheduler);
         }
 
         // ReSharper disable once UnusedParameter.Local
@@ -951,7 +957,7 @@ namespace BlobCache
 
                 if (finishedOne)
                     ConcurrencyHandler.SignalReadFinish();
-            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
+            }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
         /// <summary>
