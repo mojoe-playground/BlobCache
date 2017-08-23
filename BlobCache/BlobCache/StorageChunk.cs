@@ -71,7 +71,7 @@
         /// <param name="size">Chunk data size</param>
         /// <param name="added">Date the chunk was added</param>
         internal StorageChunk(uint id, uint userData, int chunkType, long position, uint size, DateTime added)
-            : this(id, userData, chunkType, position, size, added.Ticks)
+            : this(id, userData, chunkType, position, size, added.Ticks, null)
         {
             Added = added;
         }
@@ -85,7 +85,8 @@
         /// <param name="position">Position in the storage</param>
         /// <param name="size">Chunk data size</param>
         /// <param name="added">Date the chunk was added</param>
-        private StorageChunk(uint id, uint userData, int chunkType, long position, uint size, long added)
+        /// <param name="crc">Crc of the chunk header</param>
+        private StorageChunk(uint id, uint userData, int chunkType, long position, uint size, long added, ushort? crc)
         {
             Id = id;
             Type = chunkType;
@@ -96,16 +97,17 @@
 
             Changing = false;
             ReadCount = 0;
-            Crc = 0;
+            Crc = crc ?? (ushort)0;
             Added = DateTime.MinValue;
 
             // Use fixed size buffer so we don't need to call ToArray() on the stream, it will be one less byte[] allocation
-            using (var ms = new MemoryStream(new byte[ChunkHeaderSize - 2], 0, ChunkHeaderSize - 2, true, true))
-            using (var bw = new BinaryWriter(ms))
-            {
-                ToStorage(bw, false, true);
-                Crc = Crc16.ComputeChecksum(ms.GetBuffer());
-            }
+            if (!crc.HasValue)
+                using (var ms = new MemoryStream(new byte[ChunkHeaderSize - 2], 0, ChunkHeaderSize - 2, true, true))
+                using (var bw = new BinaryWriter(ms))
+                {
+                    ToStorage(bw, false, true);
+                    Crc = Crc16.ComputeChecksum(ms.GetBuffer());
+                }
         }
 
         /// <summary>
@@ -142,7 +144,7 @@
             if (bp + ChunkHeaderSize + s + ChunkFooterSize > reader.BaseStream.Length)
                 throw new InvalidDataException("Chunk size points outside of stream");
 
-            var chunk = new StorageChunk(i, d, t, position, s, a);
+            var chunk = new StorageChunk(i, d, t, position, s, a, null);
 
             if (chunk.Crc != crc)
                 throw new InvalidDataException("Chunk header crc error");
@@ -172,9 +174,9 @@
             var c = reader.ReadBoolean();
             var rc = reader.ReadInt32();
 
-            var chunk = new StorageChunk(i, d, t, p, s, a) { Changing = c, ReadCount = rc };
-            if (chunk.Crc != crc)
-                throw new InvalidDataException("Chunk header crc error");
+            var chunk = new StorageChunk(i, d, t, p, s, a, crc) { Changing = c, ReadCount = rc };
+            //if (chunk.Crc != crc)
+            //    throw new InvalidDataException("Chunk header crc error");
             chunk.Added = new DateTime(chunk.AddedTicks, DateTimeKind.Utc);
 
             return chunk;
