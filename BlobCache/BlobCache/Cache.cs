@@ -123,6 +123,12 @@
         public bool TruncateOnChunkInitializationError { get; set; }
 
         /// <summary>
+        /// Gets or sets the task scheduler to use for scheduling tasks
+        /// </summary>
+        [PublicAPI]
+        public TaskScheduler Scheduler { get; set; } = TaskScheduler.Default;
+
+        /// <summary>
         ///     Gets a value indicating whether cleanup needed because storage was already initialized when the constructor called
         /// </summary>
         private bool CleanupNeeded { get; }
@@ -252,7 +258,7 @@
         /// <returns>Task</returns>
         public Task Cleanup(CancellationToken token)
         {
-            return Task.Run(async () =>
+            return Task.Factory.StartNew(async () =>
             {
                 var heads = await Heads(null, token);
 
@@ -307,7 +313,7 @@
 
                 // Cut excess space at the storage end again
                 await Storage.CutBackPadding(token);
-            }, token);
+            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
         }
 
         /// <summary>

@@ -105,7 +105,7 @@ namespace BlobCache
         /// <returns>StorageChunk of the added chunk</returns>
         public Task<StorageChunk> AddChunk(int chunkType, uint userData, Stream data, CancellationToken token)
         {
-            return Task.Run(async () =>
+            return Task.Factory.StartNew(async () =>
             {
                 var l = data.Length - data.Position;
 
@@ -244,7 +244,7 @@ namespace BlobCache
                     }
                 }
                 return chunk;
-            }, token);
+            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
         }
 
         /// <summary>
@@ -253,7 +253,7 @@ namespace BlobCache
         /// <returns>Task</returns>
         public Task CutBackPadding(CancellationToken token)
         {
-            return Task.Run(async () =>
+            return Task.Factory.StartNew(async () =>
             {
                 using (var f = await Open(token))
                 {
@@ -285,7 +285,7 @@ namespace BlobCache
                         WriteInfo(info);
                     }
                 }
-            }, token);
+            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
         }
 
         /// <summary>
@@ -519,7 +519,7 @@ namespace BlobCache
             if (selector == null)
                 throw new ArgumentNullException(nameof(selector));
 
-            return Task.Run(async () =>
+            return Task.Factory.StartNew(async () =>
             {
                 var wait = false;
 
@@ -597,7 +597,7 @@ namespace BlobCache
                 }
 
                 return true;
-            }, token);
+            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
         }
 
         /// <summary>
@@ -607,7 +607,7 @@ namespace BlobCache
         /// <returns>Blob statistics</returns>
         public Task<StorageStatistics> Statistics(CancellationToken token)
         {
-            return Task.Run(async () =>
+            return Task.Factory.StartNew(async () =>
             {
                 var chunks = await GetChunks(token);
                 Info.Refresh();
@@ -624,7 +624,7 @@ namespace BlobCache
                     FreeSpace = free.Sum(c => c.Size),
                     FileSize = Info.Length
                 };
-            }, token);
+            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
         }
 
         /// <summary>
@@ -635,7 +635,7 @@ namespace BlobCache
         /// <remarks>Information purposes only, chunks can change in another thread / process</remarks>
         internal Task<IReadOnlyList<StorageChunk>> GetChunks(CancellationToken token)
         {
-            return Task.Run(() =>
+            return Task.Factory.StartNew(() =>
             {
                 using (Lock(ConcurrencyHandler.Timeout, token))
                 {
@@ -643,7 +643,7 @@ namespace BlobCache
                     CheckInitialized(info);
                     return info.Chunks;
                 }
-            }, token);
+            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current);
         }
 
         /// <summary>
@@ -678,7 +678,7 @@ namespace BlobCache
         /// <returns>Task</returns>
         private Task CheckInitialization(CancellationToken token)
         {
-            return Task.Run(() =>
+            return Task.Factory.StartNew(() =>
             {
                 using (Lock(ConcurrencyHandler.Timeout, token))
                 {
@@ -714,7 +714,7 @@ namespace BlobCache
                 }
 
                 FreshlyInitialized = true;
-            }, token);
+            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current);
         }
 
         // ReSharper disable once UnusedParameter.Local
@@ -890,7 +890,7 @@ namespace BlobCache
             if (resultProcessor == null)
                 throw new ArgumentNullException(nameof(resultProcessor));
 
-            return Task.Run(async () =>
+            return Task.Factory.StartNew(async () =>
             {
                 List<StorageChunk> chunksToRead;
 
@@ -951,7 +951,7 @@ namespace BlobCache
 
                 if (finishedOne)
                     ConcurrencyHandler.SignalReadFinish();
-            }, token);
+            }, token, TaskCreationOptions.DenyChildAttach, TaskScheduler.Current).Unwrap();
         }
 
         /// <summary>
