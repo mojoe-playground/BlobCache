@@ -1,7 +1,6 @@
 ﻿namespace BlobCache.ConcurrencyModes
 {
     using System;
-    using System.Diagnostics;
     using System.IO;
     using System.IO.MemoryMappedFiles;
     using System.Security.AccessControl;
@@ -82,9 +81,7 @@
         public override StorageInfo ReadInfo()
         {
             using (var s = Memory.CreateViewStream())
-            {
                 return StorageInfo.ReadFromStream(s);
-            }
         }
 
         /// <inheritdoc />
@@ -192,13 +189,16 @@
             [PublicAPI]
             public IDisposable Lock(int timeout, CancellationToken token)
             {
-                var sw = new Stopwatch();
-                sw.Start();
-
+                var to = 0;
+                var internalTimeout = Math.Min(timeout, 1000);
                 try
                 {
-                    if (!_mutex.WaitOne(timeout))
-                        throw new TimeoutException();
+                    while (!_mutex.WaitOne(internalTimeout))
+                    {
+                        to += internalTimeout;
+                        if (to >= timeout)
+                            throw new TimeoutException();
+                    }
                 }
                 catch (AbandonedMutexException)
                 {
@@ -210,7 +210,7 @@
             /// <summary>
             ///     Disposable for lock release
             /// </summary>
-            private class LockRelease : IDisposable
+            private sealed class LockRelease : IDisposable
             {
                 private readonly Mutex _mutex;
 

@@ -231,7 +231,7 @@ namespace BlobCache
                     }
                     finally
                     {
-                        using (Lock(ConcurrencyHandler.Timeout, CancellationToken.None))
+                        using (Lock(ConcurrencyHandler.Timeout * 4, CancellationToken.None))
                         {
                             var info = ReadInfo();
 
@@ -936,7 +936,7 @@ namespace BlobCache
                 }
                 finally
                 {
-                    using (Lock(ConcurrencyHandler.Timeout, CancellationToken.None))
+                    using (Lock(ConcurrencyHandler.Timeout * 4, CancellationToken.None))
                     {
                         var info = ReadInfo();
 
