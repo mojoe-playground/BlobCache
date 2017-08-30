@@ -12,6 +12,7 @@
     using ConcurrencyModes;
     using JetBrains.Annotations;
 
+    /// <inheritdoc />
     /// <summary>
     ///     Blob cache
     /// </summary>
@@ -40,8 +41,9 @@
 
         private TaskScheduler _scheduler = TaskScheduler.Default;
 
+        /// <inheritdoc />
         /// <summary>
-        ///     Initializes a new instance of the <see cref="Cache" /> class
+        ///     Initializes a new instance of the <see cref="T:BlobCache.Cache" /> class
         /// </summary>
         /// <param name="fileName">Storage file name</param>
         public Cache(string fileName)
@@ -49,8 +51,9 @@
         {
         }
 
+        /// <inheritdoc />
         /// <summary>
-        ///     Initializes a new instance of the <see cref="Cache" /> class
+        ///     Initializes a new instance of the <see cref="T:BlobCache.Cache" /> class
         /// </summary>
         /// <param name="fileName">Storage file name</param>
         /// <param name="keyComparer">Key comparer to use</param>
@@ -59,8 +62,9 @@
         {
         }
 
+        /// <inheritdoc />
         /// <summary>
-        ///     Initializes a new instance of the <see cref="Cache" /> class
+        ///     Initializes a new instance of the <see cref="T:BlobCache.Cache" /> class
         /// </summary>
         /// <param name="storage">Storage to use</param>
         public Cache(BlobStorage storage)
@@ -326,9 +330,7 @@
             }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
-        /// <summary>
-        ///     Disposes used resources
-        /// </summary>
+        /// <inheritdoc />
         public void Dispose()
         {
             Storage?.Dispose();
@@ -689,46 +691,73 @@
             var data = new List<StorageChunk>();
 
             var readFromCache = false;
-            // Read all head records (matching the key if given) and store all data chunk info
-            var headData = await Storage.ReadChunks(sc =>
+            var readHeads = new HashSet<uint>();
+            var headData = new List<(StorageChunk Chunk, byte[] Data)>();
+            var hasMore = true;
+            while (hasMore)
             {
-                lock (_headCache)
+                hasMore = false;
+
+                // Read all head records (matching the key if given) and store all data chunk info
+                var headsRead = await Storage.ReadChunks(sc =>
                 {
-                    // Clear cache if an item removed
-                    if (sc.RemovedVersion != _headCacheRemovedVersion)
+                    lock (_headCache)
                     {
-                        _headCacheRemovedVersion = _headCacheAddedVersion = sc.RemovedVersion;
-                        _headCache.Clear();
+                        // Clear cache if an item removed
+                        if (sc.RemovedVersion != _headCacheRemovedVersion)
+                        {
+                            _headCacheRemovedVersion = _headCacheAddedVersion = sc.RemovedVersion;
+                            _headCache.Clear();
+                            readHeads.Clear();
+                            headData.Clear();
+                        }
+
+                        // Remove all head cached data if an item added and check cached non existent data added
+                        // If an existing record is replaced it will trigger an item removal so cache will be cleared there
+                        if (sc.AddedVersion != _headCacheAddedVersion)
+                        {
+                            _headCacheAddedVersion = sc.AddedVersion;
+                            _headCache.Remove(string.Empty);
+                            readHeads.Clear();
+                            headData.Clear();
+
+                            var ids = sc.Chunks.Where(c => c.Type == ChunkTypes.Head).Select(c => c.UserData).Distinct().ToDictionary(c => c);
+
+                            foreach (var k in _headCache.Keys.ToList())
+                                if (_headCache[k].Heads.Count == 0 && ids.ContainsKey(_headCache[k].Hash))
+                                    _headCache.Remove(k);
+                        }
+
+                        // Check whether data is in the cache
+                        if (_headCache.ContainsKey(key) || _headCache.ContainsKey(string.Empty))
+                        {
+                            readFromCache = true;
+                            return null;
+                        }
                     }
 
-                    // Remove all head cached data if an item added and check cached non existent data added
-                    // If an existing record is replaced it will trigger an item removal so cache will be cleared there
-                    if (sc.AddedVersion != _headCacheAddedVersion)
+                    data = sc.Chunks.Where(c => c.Type == ChunkTypes.Data).ToList();
+                    var heads = sc.Chunks.Where(c => c.Type == ChunkTypes.Head);
+                    if (!string.IsNullOrEmpty(key))
+                        heads = heads.Where(c => c.UserData == hash);
+                    else
                     {
-                        _headCacheAddedVersion = sc.AddedVersion;
-                        _headCache.Remove(string.Empty);
-
-                        var ids = sc.Chunks.Where(c => c.Type == ChunkTypes.Head).Select(c => c.UserData).Distinct().ToDictionary(c => c);
-
-                        foreach (var k in _headCache.Keys.ToList())
-                            if (_headCache[k].Heads.Count == 0 && ids.ContainsKey(_headCache[k].Hash))
-                                _headCache.Remove(k);
+                        heads = heads.Where(c => !readHeads.Contains(c.Id));
+                        var l = heads.Take(26).ToList();
+                        hasMore = l.Count == 26;
+                        heads = l.Take(25);
                     }
 
-                    // Check whether data is in the cache
-                    if (_headCache.ContainsKey(key) || _headCache.ContainsKey(string.Empty))
-                    {
-                        readFromCache = true;
-                        return null;
-                    }
+                    return heads.ToList();
+                }, token);
+
+                foreach (var h in headsRead)
+                {
+                    if (!readHeads.Contains(h.Chunk.Id))
+                        readHeads.Add(h.Chunk.Id);
+                    headData.Add(h);
                 }
-
-                data = sc.Chunks.Where(c => c.Type == ChunkTypes.Data).ToList();
-                var heads = sc.Chunks.Where(c => c.Type == ChunkTypes.Head);
-                if (!string.IsNullOrEmpty(key))
-                    heads = heads.Where(c => c.UserData == hash);
-                return heads.ToList();
-            }, token);
+            }
 
             // If data is in the cache return it from there
             if (readFromCache)

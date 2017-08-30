@@ -13,6 +13,7 @@ namespace BlobCache
     using ConcurrencyModes;
     using JetBrains.Annotations;
 
+    /// <inheritdoc />
     /// <summary>
     ///     Blob storage class, storage data chunks in a blob
     /// </summary>
@@ -294,9 +295,7 @@ namespace BlobCache
             }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
-        /// <summary>
-        ///     Disposes the storage
-        /// </summary>
+        /// <inheritdoc />
         public void Dispose()
         {
             Log("Dispose");
@@ -729,7 +728,8 @@ namespace BlobCache
         /// </summary>
         /// <param name="info">Storage info to check</param>
         /// <exception cref="InvalidOperationException">Storage not initialized</exception>
-        private void CheckInitialized(StorageInfo info)
+        // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
+        private static void CheckInitialized(StorageInfo info)
         {
             if (!info.Initialized)
                 throw new InvalidOperationException("Storage not initialized!");
@@ -788,8 +788,18 @@ namespace BlobCache
         /// <returns>Lock release object</returns>
         private IDisposable Lock(int timeout, CancellationToken token)
         {
+            IDisposable res = null;
             Log("Waiting for lock");
-            var res = ConcurrencyHandler.Lock(timeout, token);
+            try
+            {
+                res = ConcurrencyHandler.Lock(timeout, token);
+            }
+            catch (TimeoutException) when (((Func<bool>)(() =>
+            {
+                Log("Lock timeout");
+                return false;
+            })).Invoke())
+            { }
             Log("Lock entered");
             return res;
         }
@@ -801,7 +811,7 @@ namespace BlobCache
         [Conditional("DebugLogging")]
         private void Log(string log)
         {
-            Debug.WriteLine($"BlobStorage: {GetHashCode():x8} {log}");
+            Debug.WriteLine($"BlobStorage: {Id}-{GetHashCode():x8}-{Thread.CurrentThread.ManagedThreadId} {log}");
         }
 
         /// <summary>

@@ -4,6 +4,7 @@
     using System.IO;
     using System.Text;
 
+    /// <inheritdoc cref="IEquatable{T}" />
     /// <summary>
     ///     Information about a storage chunk
     /// </summary>
@@ -61,8 +62,9 @@
         /// </summary>
         private ushort Crc { get; }
 
+        /// <inheritdoc />
         /// <summary>
-        ///     Initializes a new instance of the <see cref="StorageChunk" /> struct
+        ///     Initializes a new instance of the <see cref="T:BlobCache.StorageChunk" /> struct
         /// </summary>
         /// <param name="id">Chunk id</param>
         /// <param name="userData">User data</param>
@@ -237,7 +239,6 @@
             writer.Write(Crc);
             writer.Write(Changing);
             writer.Write(ReadCount);
-            writer.Flush();
         }
 
         /// <inheritdoc />
@@ -250,7 +251,7 @@
         public override bool Equals(object obj)
         {
             if (ReferenceEquals(null, obj)) return false;
-            return obj is StorageChunk && Equals((StorageChunk)obj);
+            return obj is StorageChunk chunk && Equals(chunk);
         }
 
         /// <inheritdoc />
@@ -259,13 +260,23 @@
             return Crc;
         }
 
-        /// <inheritdoc />
+        /// <summary>
+        /// Checks whether two chunks are equal
+        /// </summary>
+        /// <param name="left"></param>
+        /// <param name="right"></param>
+        /// <returns>True if left chunk equals right chunk, otherwise false</returns>
         public static bool operator ==(StorageChunk left, StorageChunk right)
         {
             return left.Equals(right);
         }
 
-        /// <inheritdoc />
+        /// <summary>
+        /// Checks whether two chunks are not equal
+        /// </summary>
+        /// <param name="left"></param>
+        /// <param name="right"></param>
+        /// <returns>True if left chunk not equals right chunk, otherwise false</returns>
         public static bool operator !=(StorageChunk left, StorageChunk right)
         {
             return !left.Equals(right);

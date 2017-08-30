@@ -1,4 +1,6 @@
-﻿namespace BlobCache.ConcurrencyModes
+﻿//#define DebugLogging
+
+namespace BlobCache.ConcurrencyModes
 {
     using System;
     using System.IO;
@@ -8,6 +10,7 @@
     using System.Threading;
     using JetBrains.Annotations;
 
+    /// <inheritdoc />
     /// <summary>
     ///     Concurrency handler in a single terminal session
     /// </summary>
@@ -140,12 +143,18 @@
             _rwl = null;
         }
 
+        /// <inheritdoc />
         /// <summary>
         ///     Contains data used for locking a storage
         /// </summary>
         private class GlobalLockData : IDisposable
         {
             private readonly Mutex _mutex;
+            // ReSharper disable once NotAccessedField.Local
+            private readonly Guid _id;
+#if DebugLogging
+            private int _lockedThreadId;
+#endif
 
             /// <summary>
             ///     Initializes a new instance of the <see cref="GlobalLockData" /> class
@@ -154,6 +163,7 @@
             /// <param name="global">Indicating whether to use global or terminal session specific names</param>
             public GlobalLockData(Guid id, bool global)
             {
+                _id = id;
                 var allowEveryoneRule = new MutexAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), MutexRights.FullControl, AccessControlType.Allow);
                 var securitySettings = new MutexSecurity();
                 securitySettings.AddAccessRule(allowEveryoneRule);
@@ -171,9 +181,7 @@
             /// </summary>
             public EventWaitHandle ReadEvent { get; }
 
-            /// <summary>
-            ///     Releases created handlers
-            /// </summary>
+            /// <inheritdoc />
             public void Dispose()
             {
                 _mutex.Dispose();
@@ -196,39 +204,59 @@
                     while (!_mutex.WaitOne(internalTimeout))
                     {
                         to += internalTimeout;
+#if DebugLogging
+                        System.Diagnostics.Debug.WriteLine($"BlobStorage {_id} waiting for lock: thread: -{Thread.CurrentThread.ManagedThreadId} locking: {_lockedThreadId} {DateTime.Now.ToLongTimeString()} {to} {timeout}");
+#endif
                         if (to >= timeout)
+                        {
+#if DebugLogging
+                            System.Diagnostics.Debug.WriteLine($"BlobStorage {_id} timeout: thread: -{Thread.CurrentThread.ManagedThreadId} locking: {_lockedThreadId}");
+#endif
                             throw new TimeoutException();
+                        }
                     }
                 }
                 catch (AbandonedMutexException)
                 {
                 }
 
-                return new LockRelease(_mutex);
+#if DebugLogging
+                _lockedThreadId = Thread.CurrentThread.ManagedThreadId;
+#endif
+                return new LockRelease(_mutex, this);
             }
 
+            /// <inheritdoc />
             /// <summary>
             ///     Disposable for lock release
             /// </summary>
             private sealed class LockRelease : IDisposable
             {
                 private readonly Mutex _mutex;
+                // ReSharper disable once NotAccessedField.Local
+                private readonly GlobalLockData _data;
 
                 /// <summary>
                 ///     Initializes a new instance of the <see cref="LockRelease" /> clss
                 /// </summary>
                 /// <param name="mutex">Mutex to release</param>
-                public LockRelease(Mutex mutex)
+                /// <param name="data">Lock data</param>
+                public LockRelease(Mutex mutex, GlobalLockData data)
                 {
                     _mutex = mutex;
+                    _data = data;
                 }
 
-                /// <summary>
-                ///     Releases the lock held
-                /// </summary>
+                /// <inheritdoc />
                 public void Dispose()
                 {
-                    _mutex?.ReleaseMutex();
+#if DebugLogging
+                    if (_data._lockedThreadId != Thread.CurrentThread.ManagedThreadId && System.Diagnostics.Debugger.IsAttached)
+                        System.Diagnostics.Debugger.Break();
+                    System.Diagnostics.Debug.WriteLine($"BlobStorage {_data._id} exit lock: -" + _data._lockedThreadId + " ");
+                    _data._lockedThreadId = 0;
+#endif
+                    _mutex.ReleaseMutex();
                 }
             }
         }
