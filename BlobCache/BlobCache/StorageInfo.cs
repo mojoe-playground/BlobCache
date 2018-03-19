@@ -159,7 +159,7 @@
                 var av = r.ReadUInt64();
                 var rv = r.ReadUInt64();
 
-                if (cached.AddedVersion == av && cached.RemovedVersion == rv)
+                if (cached.Initialized == i && cached.AddedVersion == av && cached.RemovedVersion == rv)
                     return cached;
 
                 var count = r.ReadInt32();
