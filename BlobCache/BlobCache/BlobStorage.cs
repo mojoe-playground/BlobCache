@@ -542,7 +542,7 @@ namespace BlobCache
                         CheckInitialized(info);
 
                         // Get the chunk to delete
-                        var item = selector.Invoke(info.FilterChunks(c => c.Type != ChunkTypes.Free && !c.Changing));
+                        var item = selector.Invoke(info.StableChunks());
                         if (item == null || item.Value == default(StorageChunk))
                             return false;
 
@@ -916,7 +916,7 @@ namespace BlobCache
 
                     CheckInitialized(info);
 
-                    chunksToRead = selector.Invoke(info.FilterChunks(c => !c.Changing && c.Type != ChunkTypes.Free))?.ToList();
+                    chunksToRead = selector.Invoke(info.StableChunks())?.ToList();
                     if (chunksToRead == null || chunksToRead.Count == 0)
                         return;
 

@@ -45,6 +45,8 @@
         /// <remarks>When the structure used in selectors it is possible the list is filtered to valid chunks for the selector</remarks>
         public IReadOnlyList<StorageChunk> Chunks => ChunkList;
 
+        private List<StorageChunk> _stableChunkList;
+
         /// <summary>
         ///     Gets or sets the chunks in storage
         /// </summary>
@@ -174,6 +176,8 @@
                 for (var c = 0; c < count; c++)
                     si.AddChunk(StorageChunk.FromStream(r));
 
+                si._stableChunkList = si.ChunkList.Where(c => !c.Changing && c.Type != ChunkTypes.Free).ToList();
+
                 return si;
             }
         }
@@ -199,11 +203,10 @@
         /// <summary>
         ///     Creates a copy of the storage info and filters chunks
         /// </summary>
-        /// <param name="filter">Filter to apply to the chunks</param>
         /// <returns>Copied storage info</returns>
-        internal StorageInfo FilterChunks(Func<StorageChunk, bool> filter)
+        internal StorageInfo StableChunks()
         {
-            return new StorageInfo { Initialized = Initialized, AddedVersion = AddedVersion, RemovedVersion = RemovedVersion, ChunkList = ChunkList.Where(filter).ToList() };
+            return new StorageInfo { Initialized = Initialized, AddedVersion = AddedVersion, RemovedVersion = RemovedVersion, ChunkList =_stableChunkList };
         }
     }
 }
