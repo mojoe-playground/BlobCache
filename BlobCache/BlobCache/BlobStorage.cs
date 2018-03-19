@@ -917,7 +917,7 @@ namespace BlobCache
                     CheckInitialized(info);
 
                     chunksToRead = selector.Invoke(info.FilterChunks(c => !c.Changing && c.Type != ChunkTypes.Free))?.ToList();
-                    if (chunksToRead == null)
+                    if (chunksToRead == null || chunksToRead.Count == 0)
                         return;
 
                     foreach (var r in chunksToRead)

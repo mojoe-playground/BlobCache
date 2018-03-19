@@ -13,7 +13,14 @@
     /// </summary>
     public struct StorageInfo
     {
+        private static readonly Random Random = new Random();
+
         private List<StorageChunk> _chunkList;
+
+        /// <summary>
+        ///     Gets or sets a synchronization value
+        /// </summary>
+        internal int Synchronization { get; set; }
 
         /// <summary>
         ///     Gets or sets a value indicating whether the storage is initialized
@@ -149,11 +156,16 @@
         ///     Reads the info from a stream
         /// </summary>
         /// <param name="stream">Stream to read from</param>
+        /// <param name="cached">Cached storage info, if <see cref="Synchronization"/> values are the same returns it instead of reading from the stream again</param>
         /// <returns>Storage info in the stream</returns>
-        internal static StorageInfo ReadFromStream(Stream stream)
+        internal static StorageInfo ReadFromStream(Stream stream, StorageInfo cached)
         {
             using (var r = new BinaryReader(stream, Encoding.UTF8))
             {
+                var s = r.ReadInt32();
+                if (cached.Synchronization == s)
+                    return cached;
+
                 var i = r.ReadBoolean();
                 var av = r.ReadUInt64();
                 var rv = r.ReadUInt64();
@@ -179,8 +191,10 @@
         /// <param name="stream">Stream to write to</param>
         internal void WriteToStream(Stream stream)
         {
+            Synchronization = Random.Next();
             using (var w = new BinaryWriter(stream, Encoding.UTF8))
             {
+                w.Write(Synchronization);
                 w.Write(Initialized);
                 w.Write(AddedVersion);
                 w.Write(RemovedVersion);

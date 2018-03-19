@@ -18,6 +18,7 @@ namespace BlobCache.ConcurrencyModes
     {
         private readonly object _locker = new object();
         private MemoryMappedFile _mmf;
+        private StorageInfo _cachedInfo;
 
         private GlobalLockData _rwl;
 
@@ -84,7 +85,7 @@ namespace BlobCache.ConcurrencyModes
         public override StorageInfo ReadInfo()
         {
             using (var s = Memory.CreateViewStream())
-                return StorageInfo.ReadFromStream(s);
+                return StorageInfo.ReadFromStream(s, _cachedInfo);
         }
 
         /// <inheritdoc />
@@ -116,6 +117,7 @@ namespace BlobCache.ConcurrencyModes
             using (var s = Memory.CreateViewStream())
             {
                 info.WriteToStream(s);
+                _cachedInfo = info;
             }
         }
 
