@@ -168,7 +168,7 @@
                 var mv = r.ReadUInt64();
 
                 if (cached.Initialized == i && cached.ModifiedVersion == mv)
-                    return new StorageInfo { Initialized = cached.Initialized, AddedVersion = cached.AddedVersion, RemovedVersion = cached.RemovedVersion, ModifiedVersion = cached.ModifiedVersion, ChunkList = cached.ChunkList.ToList(), _stableChunkList = cached._stableChunkList.ToList() };
+                    return new StorageInfo { Initialized = cached.Initialized, AddedVersion = cached.AddedVersion, RemovedVersion = cached.RemovedVersion, ModifiedVersion = cached.ModifiedVersion, ChunkList = cached.ChunkList?.ToList(), _stableChunkList = cached._stableChunkList?.ToList() };
 
                 var av = r.ReadUInt64();
                 var rv = r.ReadUInt64();
