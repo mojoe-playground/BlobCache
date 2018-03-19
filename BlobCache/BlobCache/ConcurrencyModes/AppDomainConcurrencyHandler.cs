@@ -32,7 +32,10 @@
         /// <inheritdoc />
         public override StorageInfo ReadInfo()
         {
-            return LocalSyncData.ReadInfo(Id);
+            var info = LocalSyncData.ReadInfo(Id);
+            info.RefreshStableChunks();
+
+            return info;
         }
 
         /// <inheritdoc />

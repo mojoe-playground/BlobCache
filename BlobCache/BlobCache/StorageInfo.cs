@@ -33,6 +33,12 @@
         public ulong RemovedVersion { get; internal set; }
 
         /// <summary>
+        /// Gets or sets the modified data version since storage initialization
+        /// </summary>
+        /// <remarks>Increased when storage info written to stream</remarks>
+        private ulong ModifiedVersion { get; set; }
+
+        /// <summary>
         ///     Gets the data version since storage initialization
         /// </summary>
         /// <remarks>Increased when a chunk is added to or removed from the storage</remarks>
@@ -65,8 +71,9 @@
             set
             {
                 var dict = new Dictionary<uint, int>();
-                for (var i = 0; i < value.Count; i++)
-                    dict[value[i].Id] = i;
+                if (value != null)
+                    for (var i = 0; i < value.Count; i++)
+                        dict[value[i].Id] = i;
                 _chunkList = value;
                 ChunkDictionary = dict;
             }
@@ -158,25 +165,27 @@
             using (var r = new BinaryReader(stream, Encoding.UTF8))
             {
                 var i = r.ReadBoolean();
+                var mv = r.ReadUInt64();
+
+                if (cached.Initialized == i && cached.ModifiedVersion == mv)
+                    return cached;
+
                 var av = r.ReadUInt64();
                 var rv = r.ReadUInt64();
-
-                if (cached.Initialized == i && cached.AddedVersion == av && cached.RemovedVersion == rv)
-                    return cached;
 
                 var count = r.ReadInt32();
 
                 var si = new StorageInfo
                 {
                     Initialized = i,
+                    ModifiedVersion = mv,
                     AddedVersion = av,
                     RemovedVersion = rv
                 };
 
                 for (var c = 0; c < count; c++)
                     si.AddChunk(StorageChunk.FromStream(r));
-
-                si._stableChunkList = si.ChunkList.Where(c => !c.Changing && c.Type != ChunkTypes.Free).ToList();
+                si.RefreshStableChunks();
 
                 return si;
             }
@@ -190,7 +199,9 @@
         {
             using (var w = new BinaryWriter(stream, Encoding.UTF8))
             {
+                ModifiedVersion++;
                 w.Write(Initialized);
+                w.Write(ModifiedVersion);
                 w.Write(AddedVersion);
                 w.Write(RemovedVersion);
                 w.Write(Chunks.Count);
@@ -206,7 +217,12 @@
         /// <returns>Copied storage info</returns>
         internal StorageInfo StableChunks()
         {
-            return new StorageInfo { Initialized = Initialized, AddedVersion = AddedVersion, RemovedVersion = RemovedVersion, ChunkList =_stableChunkList };
+            return new StorageInfo { Initialized = Initialized, ModifiedVersion = ModifiedVersion, AddedVersion = AddedVersion, RemovedVersion = RemovedVersion, ChunkList = _stableChunkList };
+        }
+
+        internal void RefreshStableChunks()
+        {
+            _stableChunkList = ChunkList.Where(c => !c.Changing && c.Type != ChunkTypes.Free).ToList();
         }
     }
 }

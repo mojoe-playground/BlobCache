@@ -117,6 +117,7 @@ namespace BlobCache.ConcurrencyModes
             using (var s = Memory.CreateViewStream())
             {
                 info.WriteToStream(s);
+                info.RefreshStableChunks();
                 _cachedInfo = info;
             }
         }
