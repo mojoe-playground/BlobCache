@@ -193,7 +193,7 @@ namespace BlobCache
                             fr.Flush();
                         }
 
-                        WriteInfo(info);
+                        WriteInfo(info, true);
                     }
 
                     var ok = false;
@@ -246,7 +246,7 @@ namespace BlobCache
                             info.UpdateChunk(chunk);
 
                             info.AddedVersion++;
-                            WriteInfo(info);
+                            WriteInfo(info, true);
                         }
                     }
                 }
@@ -289,7 +289,7 @@ namespace BlobCache
                         {
                             f.SetLength(position);
                         }
-                        WriteInfo(info);
+                        WriteInfo(info, true);
                     }
                 }
             }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
@@ -595,7 +595,7 @@ namespace BlobCache
                         Log($"Remove chunk {chunk} (previous: {previousChunk}, next: {nextChunk}), result: {freeChunk}");
 
                         info.RemovedVersion++;
-                        WriteInfo(info);
+                        WriteInfo(info, true);
                     }
 
                     break;
@@ -715,7 +715,7 @@ namespace BlobCache
                     }
 
                     info.Initialized = true;
-                    WriteInfo(info);
+                    WriteInfo(info, true);
                 }
 
                 FreshlyInitialized = true;
@@ -928,7 +928,7 @@ namespace BlobCache
                         Log($"Mark chunk reading: {chunk}, {chunk.ReadCount}");
                     }
 
-                    WriteInfo(info);
+                    WriteInfo(info, false);
                 }
 
                 var finishedOne = false;
@@ -961,7 +961,7 @@ namespace BlobCache
                             Log($"Unmark chunk reading: {chunk}, {chunk.ReadCount}");
                         }
 
-                        WriteInfo(info);
+                        WriteInfo(info, false);
                     }
                 }
 
@@ -983,9 +983,10 @@ namespace BlobCache
         ///     Writes the storage info
         /// </summary>
         /// <param name="info">Storage info</param>
-        private void WriteInfo(StorageInfo info)
+        /// <param name="stableChunkChanged">Indicates whether stable chunk list changed</param>
+        private void WriteInfo(StorageInfo info, bool stableChunkChanged)
         {
-            ConcurrencyHandler.WriteInfo(info);
+            ConcurrencyHandler.WriteInfo(info, stableChunkChanged);
         }
     }
 }

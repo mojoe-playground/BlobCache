@@ -78,8 +78,9 @@
         ///     Write the current storage info data
         /// </summary>
         /// <param name="info">Storage info to write</param>
+        /// <param name="stableChunkChanged">Indicating whether stable chunks list should be refreshed</param>
         /// <remarks>Call only when lock is held</remarks>
-        public abstract void WriteInfo(StorageInfo info);
+        public abstract void WriteInfo(StorageInfo info, bool stableChunkChanged);
 
         /// <summary>
         ///     Cleans up used resources

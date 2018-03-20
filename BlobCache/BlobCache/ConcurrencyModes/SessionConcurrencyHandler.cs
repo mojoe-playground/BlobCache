@@ -112,12 +112,19 @@ namespace BlobCache.ConcurrencyModes
         }
 
         /// <inheritdoc />
-        public override void WriteInfo(StorageInfo info)
+        public override void WriteInfo(StorageInfo info, bool stableChunkChanged)
         {
             using (var s = Memory.CreateViewStream())
             {
-                info.WriteToStream(s);
-                info.RefreshStableChunks();
+                using (var ms = new MemoryStream())
+                {
+                    info.WriteToStream(ms);
+                    ms.Position = 0;
+                    ms.CopyTo(s);
+                    s.Flush();
+                }
+                if (stableChunkChanged)
+                    info.RefreshStableChunks();
                 _cachedInfo = info;
             }
         }

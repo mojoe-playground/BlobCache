@@ -1,6 +1,7 @@
 ﻿namespace BlobCacheTests
 {
     using System;
+    using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Threading;
@@ -11,6 +12,50 @@
 
     public class BlobStorageTests
     {
+        [Fact]
+        public void Performance()
+        {
+            var h = new SessionConcurrencyHandler();
+            h.SetId(Guid.NewGuid());
+
+            var sw = new Stopwatch();
+            sw.Start();
+            var info = h.ReadInfo();
+            for (var i = 0u; i < 32000; i++)
+                info.AddChunk(new StorageChunk(i, 0, ChunkTypes.Test, i*1000, 1000, DateTime.Now));
+            h.WriteInfo(info, true);
+            var e1 = sw.Elapsed;
+
+            sw.Reset();
+            sw.Start();
+            for (var i = 0; i < 1000; i++)
+            {
+                var f = h.ReadInfo();
+                var s = f.StableChunks();
+            }
+            var e2 = sw.Elapsed;
+
+            sw.Reset();
+            sw.Start();
+            for (var i = 0; i < 1000; i++)
+            {
+                var f = h.ReadInfo();
+                var s = f.StableChunks();
+                h.WriteInfo(f, true);
+            }
+            var e3 = sw.Elapsed;
+
+            sw.Reset();
+            sw.Start();
+            for (var i = 0; i < 1000; i++)
+            {
+                var f = h.ReadInfo();
+                var s = f.StableChunks();
+                h.WriteInfo(f, false);
+            }
+            var e4 = sw.Elapsed;
+        }
+
         [Fact]
         public async void AddChunk()
         {

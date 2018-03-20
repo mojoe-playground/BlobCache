@@ -11,7 +11,7 @@
     /// <summary>
     ///     Information about storage chunks
     /// </summary>
-    public struct StorageInfo
+    public class StorageInfo
     {
         private List<StorageChunk> _chunkList;
 
@@ -85,6 +85,7 @@
         /// <param name="chunk">Chunk to add</param>
         internal void AddChunk(StorageChunk chunk)
         {
+            Cache = null;
             ChunkList.Add(chunk);
             ChunkDictionary[chunk.Id] = ChunkList.Count - 1;
         }
@@ -95,6 +96,7 @@
         /// <param name="chunk">Chunk to remove</param>
         internal void RemoveChunk(StorageChunk chunk)
         {
+            Cache = null;
             var index = ChunkDictionary[chunk.Id];
             ChunkList.RemoveAt(index);
 
@@ -131,6 +133,7 @@
         /// <param name="chunk">Replacement chunk</param>
         internal void ReplaceChunk(uint id, StorageChunk chunk)
         {
+            Cache = null;
             var index = ChunkDictionary[id];
             FailIndex(index);
             ChunkList[index] = chunk;
@@ -154,6 +157,8 @@
         /// </summary>
         private Dictionary<uint, int> ChunkDictionary { get; set; }
 
+        private StorageInfo Cache { get; set; }
+
         /// <summary>
         ///     Reads the info from a stream
         /// </summary>
@@ -167,8 +172,8 @@
                 var i = r.ReadBoolean();
                 var mv = r.ReadUInt64();
 
-                if (cached.Initialized == i && cached.ModifiedVersion == mv)
-                    return new StorageInfo { Initialized = cached.Initialized, AddedVersion = cached.AddedVersion, RemovedVersion = cached.RemovedVersion, ModifiedVersion = cached.ModifiedVersion, ChunkList = cached.ChunkList?.ToList(), _stableChunkList = cached._stableChunkList?.ToList() };
+                if (cached != null && cached.Initialized == i && cached.ModifiedVersion == mv)
+                    return new StorageInfo { Initialized = cached.Initialized, AddedVersion = cached.AddedVersion, RemovedVersion = cached.RemovedVersion, ModifiedVersion = cached.ModifiedVersion, _chunkList = cached._chunkList?.ToList(), ChunkDictionary = cached.ChunkDictionary?.ToDictionary(kv => kv.Key, kv => kv.Value), _stableChunkList = cached._stableChunkList?.ToList(), Cache = cached };
 
                 var av = r.ReadUInt64();
                 var rv = r.ReadUInt64();
@@ -185,7 +190,6 @@
 
                 for (var c = 0; c < count; c++)
                     si.AddChunk(StorageChunk.FromStream(r));
-                si.RefreshStableChunks();
 
                 return si;
             }
@@ -197,7 +201,8 @@
         /// <param name="stream">Stream to write to</param>
         internal void WriteToStream(Stream stream)
         {
-            using (var w = new BinaryWriter(stream, Encoding.UTF8))
+            Cache = null;
+            using (var w = new BinaryWriter(stream, Encoding.UTF8, true))
             {
                 ModifiedVersion++;
                 w.Write(Initialized);
@@ -217,12 +222,19 @@
         /// <returns>Copied storage info</returns>
         internal StorageInfo StableChunks()
         {
+            if (_stableChunkList == null)
+            {
+                _stableChunkList = ChunkList.Where(c => !c.Changing && c.Type != ChunkTypes.Free).ToList();
+                if (Cache != null && Cache._stableChunkList == null)
+                    Cache._stableChunkList = _stableChunkList;
+            }
+
             return new StorageInfo { Initialized = Initialized, ModifiedVersion = ModifiedVersion, AddedVersion = AddedVersion, RemovedVersion = RemovedVersion, ChunkList = _stableChunkList };
         }
 
         internal void RefreshStableChunks()
         {
-            _stableChunkList = ChunkList.Where(c => !c.Changing && c.Type != ChunkTypes.Free).ToList();
+            _stableChunkList = null;
         }
     }
 }
