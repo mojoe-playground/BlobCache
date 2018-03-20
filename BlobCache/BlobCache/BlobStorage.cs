@@ -128,7 +128,7 @@ namespace BlobCache
                     long lockSize = 0;
                     var ff = f;
 
-                    await Lock(ConcurrencyHandler.Timeout, token, () =>
+                    await Lock(ConcurrencyHandler.Timeout, token, false, () =>
                     {
                         var info = ReadInfo();
 
@@ -233,7 +233,7 @@ namespace BlobCache
                     }
                     finally
                     {
-                        await Lock(ConcurrencyHandler.Timeout * 4, CancellationToken.None, () =>
+                        await Lock(ConcurrencyHandler.Timeout * 4, CancellationToken.None, true, () =>
                         {
                             var info = ReadInfo();
 
@@ -266,7 +266,7 @@ namespace BlobCache
                 using (var f = await Open(token))
                 {
                     var ff = f;
-                    await Lock(ConcurrencyHandler.Timeout, token, () =>
+                    await Lock(ConcurrencyHandler.Timeout, token, false, () =>
                     {
                         var info = ReadInfo();
 
@@ -540,7 +540,7 @@ namespace BlobCache
                     {
                         var ff = f;
 
-                        var res = await Lock(ConcurrencyHandler.Timeout, token, () =>
+                        var res = await Lock(ConcurrencyHandler.Timeout, token, false, () =>
                         {
                             var info = ReadInfo();
 
@@ -651,7 +651,7 @@ namespace BlobCache
         {
             return Task.Factory.StartNew(async () =>
             {
-                return await Lock(ConcurrencyHandler.Timeout, token, () =>
+                return await Lock(ConcurrencyHandler.Timeout, token, false, () =>
                 {
                     var info = ReadInfo();
                     CheckInitialized(info);
@@ -694,7 +694,7 @@ namespace BlobCache
         {
             return Task.Factory.StartNew(async () =>
             {
-                await Lock(ConcurrencyHandler.Timeout, token, () =>
+                await Lock(ConcurrencyHandler.Timeout, token, false, () =>
                 {
                     var info = ReadInfo();
 
@@ -794,10 +794,11 @@ namespace BlobCache
         /// </summary>
         /// <param name="timeout">Timeout</param>
         /// <param name="token">Cancellation token</param>
+        /// <param name="priority">Indicates whether this lock should have priority over other locks</param>
         /// <param name="actionToRun">Action to run while locking</param>
-        private async Task Lock(int timeout, CancellationToken token, Action actionToRun)
+        private async Task Lock(int timeout, CancellationToken token, bool priority, Action actionToRun)
         {
-            await Lock(timeout, token, () => { actionToRun(); return 0; });
+            await Lock(timeout, token, priority, () => { actionToRun(); return 0; });
         }
 
         /// <summary>
@@ -805,14 +806,15 @@ namespace BlobCache
         /// </summary>
         /// <param name="timeout">Timeout</param>
         /// <param name="token">Cancellation token</param>
+        /// <param name="priority">Indicates whether this lock should have priority over other locks</param>
         /// <param name="funcToRun">Action to run while locking</param>
-        private async Task<T> Lock<T>(int timeout, CancellationToken token, Func<T> funcToRun)
+        private async Task<T> Lock<T>(int timeout, CancellationToken token, bool priority, Func<T> funcToRun)
         {
             IDisposable res = null;
             Log("Waiting for lock");
             try
             {
-                res = await ConcurrencyHandler.Lock(timeout, token);
+                res = await ConcurrencyHandler.Lock(timeout, token, priority);
             }
             catch (TimeoutException) when (((Func<bool>)(() =>
             {
@@ -932,7 +934,7 @@ namespace BlobCache
             {
                 List<StorageChunk> chunksToRead = null;
 
-                if (!await Lock(ConcurrencyHandler.Timeout, token, () =>
+                if (!await Lock(ConcurrencyHandler.Timeout, token, false, () =>
                  {
                      var info = ReadInfo();
 
@@ -970,7 +972,7 @@ namespace BlobCache
                 }
                 finally
                 {
-                    await Lock(ConcurrencyHandler.Timeout * 4, CancellationToken.None, () =>
+                    await Lock(ConcurrencyHandler.Timeout * 4, CancellationToken.None, true, () =>
                     {
                         var info = ReadInfo();
 

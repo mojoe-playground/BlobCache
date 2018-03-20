@@ -11,11 +11,13 @@
     public class AppDomainConcurrencyHandler : ConcurrencyHandler
     {
         /// <inheritdoc />
-        public override async Task<IDisposable> Lock(int timeout, CancellationToken token)
+        public override async Task<IDisposable> Lock(int timeout, CancellationToken token, bool priority)
         {
             var l = LocalSyncData.LockObject(Id);
 
             var start = DateTime.Now;
+
+            var delay = priority ? 50 : 100;
 
             while (true)
             {
@@ -29,7 +31,7 @@
                     if (DateTime.Now.Subtract(start).TotalMilliseconds > timeout)
                         throw new TimeoutException();
                     else
-                        await Task.Delay(100, token);
+                        await Task.Delay(delay, token);
 
                 return new LockRelease(l);
             }

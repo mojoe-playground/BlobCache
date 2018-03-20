@@ -77,9 +77,9 @@ namespace BlobCache.ConcurrencyModes
         }
 
         /// <inheritdoc />
-        public override Task<IDisposable> Lock(int timeout, CancellationToken token)
+        public override Task<IDisposable> Lock(int timeout, CancellationToken token, bool priority)
         {
-            return LockData.Lock(timeout, token);
+            return LockData.Lock(timeout, token, priority);
         }
 
         /// <inheritdoc />
@@ -204,11 +204,14 @@ namespace BlobCache.ConcurrencyModes
             /// </summary>
             /// <param name="timeout">Timeout</param>
             /// <param name="token">Cancellation token</param>
+            /// <param name="priority">Indicates whether this lock should have priority over other locks</param>
             /// <returns>Lock</returns>
             [PublicAPI]
-            public async Task<IDisposable> Lock(int timeout, CancellationToken token)
+            public async Task<IDisposable> Lock(int timeout, CancellationToken token, bool priority)
             {
                 var internalTimeout = Math.Min(timeout, 100);
+                if (priority)
+                    internalTimeout = internalTimeout / 2;
                 try
                 {
                     var start = DateTime.Now;

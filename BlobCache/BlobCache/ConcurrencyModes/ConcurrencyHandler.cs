@@ -35,10 +35,11 @@
         /// </summary>
         /// <param name="timeout">Timeout for locking</param>
         /// <param name="token">Cancellation token</param>
+        /// <param name="priority">Indicates whether this lock should have priority over other locks</param>
         /// <returns>Lock token</returns>
         /// <exception cref="TimeoutException">When lock timed out</exception>
         /// <exception cref="OperationCanceledException">When cancellation token canceled</exception>
-        public abstract Task<IDisposable> Lock(int timeout, CancellationToken token);
+        public abstract Task<IDisposable> Lock(int timeout, CancellationToken token, bool priority);
 
         /// <summary>
         ///     Reads the current storage info data
