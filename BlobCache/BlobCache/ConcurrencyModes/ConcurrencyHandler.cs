@@ -2,6 +2,7 @@
 {
     using System;
     using System.Threading;
+    using System.Threading.Tasks;
     using JetBrains.Annotations;
 
     /// <summary>
@@ -37,7 +38,7 @@
         /// <returns>Lock token</returns>
         /// <exception cref="TimeoutException">When lock timed out</exception>
         /// <exception cref="OperationCanceledException">When cancellation token canceled</exception>
-        public abstract IDisposable Lock(int timeout, CancellationToken token);
+        public abstract Task<IDisposable> Lock(int timeout, CancellationToken token);
 
         /// <summary>
         ///     Reads the current storage info data

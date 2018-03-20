@@ -121,13 +121,14 @@ namespace BlobCache
 
                 var size = (uint)l;
 
-                StorageChunk chunk;
+                var chunk = default(StorageChunk);
 
                 using (var f = await Open(token))
                 {
-                    long lockSize;
+                    long lockSize = 0;
+                    var ff = f;
 
-                    using (Lock(ConcurrencyHandler.Timeout, token))
+                    await Lock(ConcurrencyHandler.Timeout, token, () =>
                     {
                         var info = ReadInfo();
 
@@ -173,7 +174,7 @@ namespace BlobCache
                             Log($"Add chunk {chunk}");
                         }
 
-                        using (var fr = f.Range(chunk.Position, lockSize, LockMode.Exclusive))
+                        using (var fr = ff.Range(chunk.Position, lockSize, LockMode.Exclusive))
                         using (var w = new BinaryWriter(fr, Encoding.UTF8))
                         {
                             if (fr.Stream.Length < chunk.Position + lockSize)
@@ -194,7 +195,7 @@ namespace BlobCache
                         }
 
                         WriteInfo(info, true);
-                    }
+                    });
 
                     var ok = false;
 
@@ -232,7 +233,7 @@ namespace BlobCache
                     }
                     finally
                     {
-                        using (Lock(ConcurrencyHandler.Timeout * 4, CancellationToken.None))
+                        await Lock(ConcurrencyHandler.Timeout * 4, CancellationToken.None, () =>
                         {
                             var info = ReadInfo();
 
@@ -247,7 +248,7 @@ namespace BlobCache
 
                             info.AddedVersion++;
                             WriteInfo(info, true);
-                        }
+                        });
                     }
                 }
                 return chunk;
@@ -264,13 +265,14 @@ namespace BlobCache
             {
                 using (var f = await Open(token))
                 {
-                    using (Lock(ConcurrencyHandler.Timeout, token))
+                    var ff = f;
+                    await Lock(ConcurrencyHandler.Timeout, token, () =>
                     {
                         var info = ReadInfo();
 
                         CheckInitialized(info);
 
-                        var position = f.Length;
+                        var position = ff.Length;
                         while (info.Chunks.Count > 0)
                         {
                             var chunk = info.Chunks.Last();
@@ -282,15 +284,15 @@ namespace BlobCache
                             position = chunk.Position;
                         }
 
-                        if (position == f.Length)
+                        if (position == ff.Length)
                             return;
 
-                        using (f.Lock(position, f.Length - position, LockMode.Exclusive))
+                        using (ff.Lock(position, ff.Length - position, LockMode.Exclusive))
                         {
-                            f.SetLength(position);
+                            ff.SetLength(position);
                         }
                         WriteInfo(info, true);
-                    }
+                    });
                 }
             }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
@@ -535,73 +537,80 @@ namespace BlobCache
                         ConcurrencyHandler.WaitForReadFinish(token);
 
                     using (var f = await Open(token))
-                    using (Lock(ConcurrencyHandler.Timeout, token))
                     {
-                        var info = ReadInfo();
+                        var ff = f;
 
-                        CheckInitialized(info);
-
-                        // Get the chunk to delete
-                        var item = selector.Invoke(info.StableChunks());
-                        if (item == null || item.Value == default(StorageChunk))
-                            return false;
-
-                        var chunk = item.Value;
-
-                        // if there are readers for the chunk, wait for finish and try again
-                        if (chunk.ReadCount > 0)
+                        var res = await Lock(ConcurrencyHandler.Timeout, token, () =>
                         {
-                            wait = true;
-                            ConcurrencyHandler.SignalWaitRequired();
+                            var info = ReadInfo();
+
+                            CheckInitialized(info);
+
+                            // Get the chunk to delete
+                            var item = selector.Invoke(info.StableChunks());
+                            if (item == null || item.Value == default(StorageChunk))
+                                return 0;
+
+                            var chunk = item.Value;
+
+                            // if there are readers for the chunk, wait for finish and try again
+                            if (chunk.ReadCount > 0)
+                            {
+                                wait = true;
+                                ConcurrencyHandler.SignalWaitRequired();
+                                return -1;
+                            }
+
+                            var freeSize = chunk.Size;
+                            var freePosition = chunk.Position;
+
+                            // Check next chunk is free, combine free space
+                            var nextPos = chunk.Position + StorageChunk.ChunkHeaderSize + chunk.Size + StorageChunk.ChunkFooterSize;
+                            var nextChunk = info.Chunks.FirstOrDefault(c => c.Position == nextPos);
+
+                            if (nextChunk.Type == ChunkTypes.Free && !nextChunk.Changing)
+                            {
+                                freeSize += StorageChunk.ChunkHeaderSize + nextChunk.Size + StorageChunk.ChunkFooterSize;
+                                info.RemoveChunk(nextChunk);
+                            }
+
+                            // Check previous chunk is free, combine free space
+                            var pos = chunk.Position;
+                            var previousChunk = info.Chunks.FirstOrDefault(c => c.Position + c.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize == pos);
+
+                            if (previousChunk.Type == ChunkTypes.Free && !previousChunk.Changing)
+                            {
+                                freeSize += StorageChunk.ChunkHeaderSize + previousChunk.Size + StorageChunk.ChunkFooterSize;
+                                freePosition = previousChunk.Position;
+                                info.RemoveChunk(previousChunk);
+                            }
+
+                            // Mark the chunk changing while updating the file
+                            var freeChunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition, freeSize, DateTime.UtcNow);
+                            info.UpdateChunk(freeChunk);
+
+                            using (var fr = ff.Range(freeChunk.Position, freeSize + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, LockMode.Exclusive))
+                            using (var w = new BinaryWriter(fr, Encoding.UTF8))
+                            {
+                                // Mark the chunk free
+                                freeChunk.ToStorage(w);
+                                fr.Flush();
+                            }
+
+                            Log($"Remove chunk {chunk} (previous: {previousChunk}, next: {nextChunk}), result: {freeChunk}");
+
+                            info.RemovedVersion++;
+                            WriteInfo(info, true);
+
+                            return 1;
+                        });
+
+                        if (res == -1)
                             continue;
-                        }
 
-                        var freeSize = chunk.Size;
-                        var freePosition = chunk.Position;
-
-                        // Check next chunk is free, combine free space
-                        var nextPos = chunk.Position + StorageChunk.ChunkHeaderSize + chunk.Size + StorageChunk.ChunkFooterSize;
-                        var nextChunk = info.Chunks.FirstOrDefault(c => c.Position == nextPos);
-
-                        if (nextChunk.Type == ChunkTypes.Free && !nextChunk.Changing)
-                        {
-                            freeSize += StorageChunk.ChunkHeaderSize + nextChunk.Size + StorageChunk.ChunkFooterSize;
-                            info.RemoveChunk(nextChunk);
-                        }
-
-                        // Check previous chunk is free, combine free space
-                        var pos = chunk.Position;
-                        var previousChunk = info.Chunks.FirstOrDefault(c => c.Position + c.Size + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize == pos);
-
-                        if (previousChunk.Type == ChunkTypes.Free && !previousChunk.Changing)
-                        {
-                            freeSize += StorageChunk.ChunkHeaderSize + previousChunk.Size + StorageChunk.ChunkFooterSize;
-                            freePosition = previousChunk.Position;
-                            info.RemoveChunk(previousChunk);
-                        }
-
-                        // Mark the chunk changing while updating the file
-                        var freeChunk = new StorageChunk(chunk.Id, 0, ChunkTypes.Free, freePosition, freeSize, DateTime.UtcNow);
-                        info.UpdateChunk(freeChunk);
-
-                        using (var fr = f.Range(freeChunk.Position, freeSize + StorageChunk.ChunkHeaderSize + StorageChunk.ChunkFooterSize, LockMode.Exclusive))
-                        using (var w = new BinaryWriter(fr, Encoding.UTF8))
-                        {
-                            // Mark the chunk free
-                            freeChunk.ToStorage(w);
-                            fr.Flush();
-                        }
-
-                        Log($"Remove chunk {chunk} (previous: {previousChunk}, next: {nextChunk}), result: {freeChunk}");
-
-                        info.RemovedVersion++;
-                        WriteInfo(info, true);
+                        return res == 1;
                     }
-
-                    break;
                 }
-
-                return true;
             }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
@@ -640,15 +649,15 @@ namespace BlobCache
         /// <remarks>Information purposes only, chunks can change in another thread / process</remarks>
         internal Task<IReadOnlyList<StorageChunk>> GetChunks(CancellationToken token)
         {
-            return Task.Factory.StartNew(() =>
+            return Task.Factory.StartNew(async () =>
             {
-                using (Lock(ConcurrencyHandler.Timeout, token))
+                return await Lock(ConcurrencyHandler.Timeout, token, () =>
                 {
                     var info = ReadInfo();
                     CheckInitialized(info);
                     return info.Chunks;
-                }
-            }, token, TaskCreationOptions.DenyChildAttach, Scheduler);
+                });
+            }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
         /// <summary>
@@ -683,9 +692,9 @@ namespace BlobCache
         /// <returns>Task</returns>
         private Task CheckInitialization(CancellationToken token)
         {
-            return Task.Factory.StartNew(() =>
+            return Task.Factory.StartNew(async () =>
             {
-                using (Lock(ConcurrencyHandler.Timeout, token))
+                await Lock(ConcurrencyHandler.Timeout, token, () =>
                 {
                     var info = ReadInfo();
 
@@ -716,10 +725,10 @@ namespace BlobCache
 
                     info.Initialized = true;
                     WriteInfo(info, true);
-                }
+                });
 
                 FreshlyInitialized = true;
-            }, token, TaskCreationOptions.DenyChildAttach, Scheduler);
+            }, token, TaskCreationOptions.DenyChildAttach, Scheduler).Unwrap();
         }
 
         // ReSharper disable once UnusedParameter.Local
@@ -785,14 +794,25 @@ namespace BlobCache
         /// </summary>
         /// <param name="timeout">Timeout</param>
         /// <param name="token">Cancellation token</param>
-        /// <returns>Lock release object</returns>
-        private IDisposable Lock(int timeout, CancellationToken token)
+        /// <param name="actionToRun">Action to run while locking</param>
+        private async Task Lock(int timeout, CancellationToken token, Action actionToRun)
+        {
+            await Lock(timeout, token, () => { actionToRun(); return 0; });
+        }
+
+        /// <summary>
+        ///     Locks the blob storage info
+        /// </summary>
+        /// <param name="timeout">Timeout</param>
+        /// <param name="token">Cancellation token</param>
+        /// <param name="funcToRun">Action to run while locking</param>
+        private async Task<T> Lock<T>(int timeout, CancellationToken token, Func<T> funcToRun)
         {
             IDisposable res = null;
             Log("Waiting for lock");
             try
             {
-                res = ConcurrencyHandler.Lock(timeout, token);
+                res = await ConcurrencyHandler.Lock(timeout, token);
             }
             catch (TimeoutException) when (((Func<bool>)(() =>
             {
@@ -800,8 +820,10 @@ namespace BlobCache
                 return false;
             })).Invoke())
             { }
+
             Log("Lock entered");
-            return res;
+            using (res)
+                return funcToRun();
         }
 
         /// <summary>
@@ -908,28 +930,30 @@ namespace BlobCache
 
             return Task.Factory.StartNew(async () =>
             {
-                List<StorageChunk> chunksToRead;
+                List<StorageChunk> chunksToRead = null;
 
-                using (Lock(ConcurrencyHandler.Timeout, token))
-                {
-                    var info = ReadInfo();
+                if (!await Lock(ConcurrencyHandler.Timeout, token, () =>
+                 {
+                     var info = ReadInfo();
 
-                    CheckInitialized(info);
+                     CheckInitialized(info);
 
-                    chunksToRead = selector.Invoke(info.StableChunks())?.ToList();
-                    if (chunksToRead == null || chunksToRead.Count == 0)
-                        return;
+                     chunksToRead = selector.Invoke(info.StableChunks())?.ToList();
+                     if (chunksToRead == null || chunksToRead.Count == 0)
+                         return false;
 
-                    foreach (var r in chunksToRead)
-                    {
-                        var chunk = r;
-                        chunk.ReadCount++;
-                        info.UpdateChunk(chunk);
-                        Log($"Mark chunk reading: {chunk}, {chunk.ReadCount}");
-                    }
+                     foreach (var r in chunksToRead)
+                     {
+                         var chunk = r;
+                         chunk.ReadCount++;
+                         info.UpdateChunk(chunk);
+                         Log($"Mark chunk reading: {chunk}, {chunk.ReadCount}");
+                     }
 
-                    WriteInfo(info, false);
-                }
+                     WriteInfo(info, false);
+                     return true;
+                 }))
+                    return;
 
                 var finishedOne = false;
                 try
@@ -946,7 +970,7 @@ namespace BlobCache
                 }
                 finally
                 {
-                    using (Lock(ConcurrencyHandler.Timeout * 4, CancellationToken.None))
+                    await Lock(ConcurrencyHandler.Timeout * 4, CancellationToken.None, () =>
                     {
                         var info = ReadInfo();
 
@@ -962,7 +986,7 @@ namespace BlobCache
                         }
 
                         WriteInfo(info, false);
-                    }
+                    });
                 }
 
                 if (finishedOne)

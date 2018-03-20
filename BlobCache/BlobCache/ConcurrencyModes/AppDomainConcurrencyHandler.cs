@@ -3,6 +3,7 @@
     using System;
     using System.Collections.Generic;
     using System.Threading;
+    using System.Threading.Tasks;
 
     /// <summary>
     ///     Concurrency handler in an app domain
@@ -10,23 +11,28 @@
     public class AppDomainConcurrencyHandler : ConcurrencyHandler
     {
         /// <inheritdoc />
-        public override IDisposable Lock(int timeout, CancellationToken token)
+        public override async Task<IDisposable> Lock(int timeout, CancellationToken token)
         {
             var l = LocalSyncData.LockObject(Id);
 
-            if (timeout < 0)
-            {
-                Monitor.Enter(l);
-            }
-            else
+            var start = DateTime.Now;
+
+            while (true)
             {
                 var lockTaken = false;
-                Monitor.TryEnter(l, timeout, ref lockTaken);
-                if (!lockTaken)
-                    throw new TimeoutException();
-            }
+                Monitor.TryEnter(l, 0, ref lockTaken);
 
-            return new LockRelease(l);
+                if (timeout < 0)
+                    continue;
+
+                if (!lockTaken)
+                    if (DateTime.Now.Subtract(start).TotalMilliseconds > timeout)
+                        throw new TimeoutException();
+                    else
+                        await Task.Delay(100, token);
+
+                return new LockRelease(l);
+            }
         }
 
         /// <inheritdoc />

@@ -8,6 +8,7 @@ namespace BlobCache.ConcurrencyModes
     using System.Security.AccessControl;
     using System.Security.Principal;
     using System.Threading;
+    using System.Threading.Tasks;
     using JetBrains.Annotations;
 
     /// <inheritdoc />
@@ -76,7 +77,7 @@ namespace BlobCache.ConcurrencyModes
         }
 
         /// <inheritdoc />
-        public override IDisposable Lock(int timeout, CancellationToken token)
+        public override Task<IDisposable> Lock(int timeout, CancellationToken token)
         {
             return LockData.Lock(timeout, token);
         }
@@ -205,25 +206,27 @@ namespace BlobCache.ConcurrencyModes
             /// <param name="token">Cancellation token</param>
             /// <returns>Lock</returns>
             [PublicAPI]
-            public IDisposable Lock(int timeout, CancellationToken token)
+            public async Task<IDisposable> Lock(int timeout, CancellationToken token)
             {
-                var to = 0;
-                var internalTimeout = Math.Min(timeout, 1000);
+                var internalTimeout = Math.Min(timeout, 100);
                 try
                 {
-                    while (!_mutex.WaitOne(internalTimeout))
+                    var start = DateTime.Now;
+
+                    while (!_mutex.WaitOne(0))
                     {
-                        to += internalTimeout;
 #if DebugLogging
                         System.Diagnostics.Debug.WriteLine($"BlobStorage {_id} waiting for lock: thread: -{Thread.CurrentThread.ManagedThreadId} locking: {_lockedThreadId} {DateTime.Now.ToLongTimeString()} {to} {timeout}");
 #endif
-                        if (to >= timeout)
+                        if (DateTime.Now.Subtract(start).TotalMilliseconds > timeout)
                         {
 #if DebugLogging
                             System.Diagnostics.Debug.WriteLine($"BlobStorage {_id} timeout: thread: -{Thread.CurrentThread.ManagedThreadId} locking: {_lockedThreadId}");
 #endif
                             throw new TimeoutException();
                         }
+
+                        await Task.Delay(internalTimeout, token);
                     }
                 }
                 catch (AbandonedMutexException)
