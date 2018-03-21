@@ -810,22 +810,37 @@ namespace BlobCache
         /// <param name="funcToRun">Action to run while locking</param>
         private async Task<T> Lock<T>(int timeout, CancellationToken token, bool priority, Func<T> funcToRun)
         {
-            IDisposable res = null;
             Log("Waiting for lock");
+
+            var entered = false;
+
+            var internalTimeout = Math.Min(timeout, 100);
+            if (priority)
+                internalTimeout = internalTimeout / 2;
+            var start = DateTime.Now;
+
             try
             {
-                res = await ConcurrencyHandler.Lock(timeout, token, priority);
-            }
-            catch (TimeoutException) when (((Func<bool>)(() =>
-            {
-                Log("Lock timeout");
-                return false;
-            })).Invoke())
-            { }
+                while (!ConcurrencyHandler.TryEnterLock())
+                {
+                    if (DateTime.Now.Subtract(start).TotalMilliseconds > timeout)
+                    {
+                        Log("Lock timeout");
+                        throw new TimeoutException();
+                    }
 
-            Log("Lock entered");
-            using (res)
+                    await Task.Delay(internalTimeout, token);
+                }
+                entered = true;
+
+                Log("Lock entered");
                 return funcToRun();
+            }
+            finally
+            {
+                if (entered)
+                    ConcurrencyHandler.ReleaseLock();
+            }
         }
 
         /// <summary>

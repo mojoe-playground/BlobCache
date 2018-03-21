@@ -31,15 +31,15 @@
         }
 
         /// <summary>
-        ///     Locks the storage info
+        /// Try to enter the lock
         /// </summary>
-        /// <param name="timeout">Timeout for locking</param>
-        /// <param name="token">Cancellation token</param>
-        /// <param name="priority">Indicates whether this lock should have priority over other locks</param>
-        /// <returns>Lock token</returns>
-        /// <exception cref="TimeoutException">When lock timed out</exception>
-        /// <exception cref="OperationCanceledException">When cancellation token canceled</exception>
-        public abstract Task<IDisposable> Lock(int timeout, CancellationToken token, bool priority);
+        /// <returns>True if locked, otherwise false</returns>
+        public abstract bool TryEnterLock();
+
+        /// <summary>
+        /// Releases entered lock
+        /// </summary>
+        public abstract void ReleaseLock();
 
         /// <summary>
         ///     Reads the current storage info data

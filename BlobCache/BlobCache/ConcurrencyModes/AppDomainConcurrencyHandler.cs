@@ -3,7 +3,6 @@
     using System;
     using System.Collections.Generic;
     using System.Threading;
-    using System.Threading.Tasks;
 
     /// <summary>
     ///     Concurrency handler in an app domain
@@ -11,30 +10,20 @@
     public class AppDomainConcurrencyHandler : ConcurrencyHandler
     {
         /// <inheritdoc />
-        public override async Task<IDisposable> Lock(int timeout, CancellationToken token, bool priority)
+        public override bool TryEnterLock()
         {
             var l = LocalSyncData.LockObject(Id);
+            var lockTaken = false;
+            Monitor.TryEnter(l, 0, ref lockTaken);
 
-            var start = DateTime.Now;
+            return lockTaken;
+        }
 
-            var delay = priority ? 50 : 100;
-
-            while (true)
-            {
-                var lockTaken = false;
-                Monitor.TryEnter(l, 0, ref lockTaken);
-
-                if (timeout < 0)
-                    continue;
-
-                if (!lockTaken)
-                    if (DateTime.Now.Subtract(start).TotalMilliseconds > timeout)
-                        throw new TimeoutException();
-                    else
-                        await Task.Delay(delay, token);
-
-                return new LockRelease(l);
-            }
+        /// <inheritdoc />
+        public override void ReleaseLock()
+        {
+            var l = LocalSyncData.LockObject(Id);
+            Monitor.Exit(l);
         }
 
         /// <inheritdoc />
@@ -180,31 +169,6 @@
                     var r = Data[id];
                     Data[id] = (r.UsedLockCount, info, r.Lock, r.ManualReset, r.Counter);
                 }
-            }
-        }
-
-        /// <summary>
-        ///     Lock release class
-        /// </summary>
-        private class LockRelease : IDisposable
-        {
-            private readonly object _lock;
-
-            /// <summary>
-            ///     Initializes a new instance of the <see cref="LockRelease" /> class
-            /// </summary>
-            /// <param name="locker">Lock to release when disposed</param>
-            public LockRelease(object locker)
-            {
-                _lock = locker;
-            }
-
-            /// <summary>
-            ///     Releases the lock held
-            /// </summary>
-            public void Dispose()
-            {
-                Monitor.Exit(_lock);
             }
         }
     }
